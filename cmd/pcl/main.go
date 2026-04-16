@@ -12,7 +12,7 @@ import (
 
 func newRootCmd(opts *linter.Config) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "PCL",
+		Use:   "pcl",
 		Short: "Policy-based X.509 certificate linter",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.PolicyPath == "" {
