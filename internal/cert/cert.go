@@ -36,15 +36,15 @@ func GetCertFiles(path string) ([]string, error) {
 	return io.GetFilesWithExtensions(path, extensions...)
 }
 
-func isSelfSigned(cert *x509.Certificate) bool {
+func IsSelfSigned(cert *x509.Certificate) bool {
 	return cert.Subject.String() == cert.Issuer.String()
 }
 
-func getCertType(cert *x509.Certificate, position, chainLen int) string {
+func GetCertType(cert *x509.Certificate, position, chainLen int) string {
 	if position == 0 {
 		return "leaf"
 	}
-	if position == chainLen-1 && isSelfSigned(cert) {
+	if position == chainLen-1 && IsSelfSigned(cert) {
 		return "root"
 	}
 	return "intermediate"

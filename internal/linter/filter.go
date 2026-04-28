@@ -2,10 +2,12 @@ package linter
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/zmap/zcrypto/x509"
 
 	"github.com/cavoq/PCL/internal/policy"
+	"github.com/cavoq/PCL/internal/rule"
 )
 
 // OID constants for CRL extensions
@@ -65,11 +67,58 @@ func normalizeOID(nameOrOID string) string {
 
 // policyAppliesToInput checks if a policy applies to the given input type
 func policyAppliesToInput(p policy.Policy, inputType string) bool {
-	// If AppliesTo is empty, apply to all (backward compatible)
-	if len(p.AppliesTo) == 0 {
-		return true
+	// If AppliesTo is explicitly set, use it
+	if len(p.AppliesTo) > 0 {
+		return slices.Contains(p.AppliesTo, inputType)
 	}
-	return slices.Contains(p.AppliesTo, inputType)
+
+	// Infer from rule targets if AppliesTo is not set
+	// If all targets start with "certificate.", it's a cert policy
+	// If all targets start with "crl.", it's a CRL policy
+	// If all targets start with "ocsp.", it's an OCSP policy
+	if len(p.Rules) > 0 {
+		inferredType := inferInputTypeFromRules(p.Rules)
+		return inferredType == inputType || inferredType == ""
+	}
+
+	// Default: apply to all (backward compatible for empty policies)
+	return true
+}
+
+// inferInputTypeFromRules determines the input type from rule targets
+func inferInputTypeFromRules(rules []rule.Rule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+
+	// Check first rule target
+	target := rules[0].Target
+	if strings.HasPrefix(target, "certificate.") {
+		return AppliesToCert
+	}
+	if strings.HasPrefix(target, "crl.") {
+		return AppliesToCRL
+	}
+	if strings.HasPrefix(target, "ocsp.") {
+		return AppliesToOCSP
+	}
+
+	// Check "when" condition target if main target doesn't indicate type
+	if rules[0].When != nil && rules[0].When.Target != "" {
+		whenTarget := rules[0].When.Target
+		if strings.HasPrefix(whenTarget, "certificate.") {
+			return AppliesToCert
+		}
+		if strings.HasPrefix(whenTarget, "crl.") {
+			return AppliesToCRL
+		}
+		if strings.HasPrefix(whenTarget, "ocsp.") {
+			return AppliesToOCSP
+		}
+	}
+
+	// Unknown target format, apply to all
+	return ""
 }
 
 // policyAppliesToCert checks if a policy applies to a specific certificate

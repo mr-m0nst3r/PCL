@@ -63,8 +63,48 @@ func Evaluate(
 	// For presence/absence operators, continue evaluation even if target not found
 	// present: returns false when target not found (expected behavior)
 	// absent: returns true when target not found (expected behavior)
+	// For eq/neq operators on keyUsage boolean fields, treat missing as implicit false
 	// For other operators, skip when target not found (e.g., certificate rules when processing CRLs)
 	if !found && r.Operator != "present" && r.Operator != "absent" {
+		// Special handling for eq/neq on keyUsage boolean fields
+		if (r.Operator == "eq" || r.Operator == "neq") && isKeyUsageBooleanField(r.Target) {
+			// Missing keyUsage bit = implicit false
+			// For eq true: false != true → FAIL
+			// For eq false: false == false → PASS
+			// For neq true: false != true → PASS
+			// For neq false: false == false → FAIL
+			var targetNode *node.Node
+			op, err := reg.Get(r.Operator)
+			if err != nil {
+				return Result{
+					RuleID:    r.ID,
+					Reference: r.Reference,
+					Verdict:   VerdictFail,
+					Message:   fmt.Sprintf("operator not found: %s", r.Operator),
+					Severity:  r.Severity,
+				}
+			}
+			ok, err := op.Evaluate(targetNode, ctx, r.Operands)
+			if err != nil {
+				return Result{
+					RuleID:    r.ID,
+					Reference: r.Reference,
+					Verdict:   VerdictFail,
+					Message:   fmt.Sprintf("operator %s on %s: %v", r.Operator, r.Target, err),
+					Severity:  r.Severity,
+				}
+			}
+			verdict := VerdictPass
+			if !ok {
+				verdict = VerdictFail
+			}
+			return Result{
+				RuleID:    r.ID,
+				Reference: r.Reference,
+				Verdict:   verdict,
+				Severity:  r.Severity,
+			}
+		}
 		return Result{
 			RuleID:    r.ID,
 			Reference: r.Reference,
@@ -139,4 +179,22 @@ func appliesTo(r Rule, ctx *operator.EvaluationContext) bool {
 		return true
 	}
 	return slices.Contains(r.AppliesTo, ctx.Cert.Type)
+}
+
+// isKeyUsageBooleanField checks if the target is a keyUsage boolean field.
+// These fields represent key usage bits that are implicitly false when not present.
+func isKeyUsageBooleanField(target string) bool {
+	keyUsageFields := []string{
+		"certificate.keyUsage.digitalSignature",
+		"certificate.keyUsage.nonRepudiation",
+		"certificate.keyUsage.contentCommitment",
+		"certificate.keyUsage.keyEncipherment",
+		"certificate.keyUsage.dataEncipherment",
+		"certificate.keyUsage.keyAgreement",
+		"certificate.keyUsage.keyCertSign",
+		"certificate.keyUsage.cRLSign",
+		"certificate.keyUsage.encipherOnly",
+		"certificate.keyUsage.decipherOnly",
+	}
+	return slices.Contains(keyUsageFields, target)
 }

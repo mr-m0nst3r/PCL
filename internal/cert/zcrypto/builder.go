@@ -87,6 +87,11 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 		root.Children["ocspURL"] = node.New("ocspURL", cert.OCSPServer[0])
 	}
 
+	// Add CA Issuers URL from AIA extension
+	if len(cert.IssuingCertificateURL) > 0 {
+		root.Children["caIssuersURL"] = node.New("caIssuersURL", cert.IssuingCertificateURL[0])
+	}
+
 	// Add CRL Distribution Points
 	if len(cert.CRLDistributionPoints) > 0 {
 		crlDPNode := node.New("cRLDistributionPoints", nil)
@@ -94,6 +99,26 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 			crlDPNode.Children[fmt.Sprintf("%d", i)] = node.New(fmt.Sprintf("%d", i), uri)
 		}
 		root.Children["cRLDistributionPoints"] = crlDPNode
+	}
+
+	// Add Signed Certificate Timestamps (SCT) from CT extension
+	if len(cert.SignedCertificateTimestampList) > 0 {
+		sctNode := node.New("signedCertificateTimestamps", nil)
+		for i, sct := range cert.SignedCertificateTimestampList {
+			sctNode.Children[fmt.Sprintf("%d", i)] = buildSCT(sct, i)
+		}
+		root.Children["signedCertificateTimestamps"] = sctNode
+	}
+
+	// Add Certificate Policies
+	if len(cert.PolicyIdentifiers) > 0 {
+		policiesNode := node.New("certificatePolicies", nil)
+		for i, oid := range cert.PolicyIdentifiers {
+			policyNode := node.New(fmt.Sprintf("%d", i), nil)
+			policyNode.Children["oid"] = node.New("oid", oid.String())
+			policiesNode.Children[oid.String()] = policyNode
+		}
+		root.Children["certificatePolicies"] = policiesNode
 	}
 
 	return root
@@ -330,5 +355,13 @@ func buildECDSAKey(key *ecdsa.PublicKey) *node.Node {
 	n := node.New("publicKey", nil)
 	n.Children["keySize"] = node.New("keySize", key.Curve.Params().BitSize)
 	n.Children["curve"] = node.New("curve", key.Curve.Params().Name)
+	return n
+}
+
+func buildSCT(sct interface{}, index int) *node.Node {
+	n := node.New(fmt.Sprintf("%d", index), nil)
+	// SCT contains: LogID, Timestamp, Extensions, Signature
+	// We store basic presence info; detailed validation in operators
+	n.Children["present"] = node.New("present", true)
 	return n
 }

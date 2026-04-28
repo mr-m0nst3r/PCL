@@ -16,6 +16,13 @@ func ToStdCert(cert *zx509.Certificate) (*stdx509.Certificate, error) {
 	return stdx509.ParseCertificate(cert.Raw)
 }
 
+func FromStdCert(cert *stdx509.Certificate) (*zx509.Certificate, error) {
+	if cert == nil {
+		return nil, nil
+	}
+	return zx509.ParseCertificate(cert.Raw)
+}
+
 func BuildPkixName(name string, pkixName pkix.Name) *node.Node {
 	n := node.New(name, nil)
 

@@ -18,4 +18,11 @@ type Config struct {
 	OutputFmt    string
 	Verbosity    int
 	ShowMeta     bool
+
+	// Auto-validate mode options
+	AutoValidate     bool   // Enable automatic PKI resource fetching
+	AutoValidateOCSP bool   // Fetch OCSP from AIA (default true when AutoValidate)
+	AutoValidateCRL  bool   // Fetch CRL from CRL DP (default true when AutoValidate)
+	AutoValidateChain bool   // Climb chain via CA Issuers URLs (default true when AutoValidate)
+	MaxChainDepth    int    // Maximum chain depth for climbing (default 10)
 }

@@ -38,7 +38,7 @@ func BuildChain(certs []*Info) ([]*Info, error) {
 
 	if len(certs) == 1 {
 		certs[0].Position = 0
-		certs[0].Type = getCertType(certs[0].Cert, 0, 1)
+		certs[0].Type = GetCertType(certs[0].Cert, 0, 1)
 		return certs, nil
 	}
 
@@ -54,7 +54,7 @@ func BuildChain(certs []*Info) ([]*Info, error) {
 		current := leaf
 
 		for {
-			if isSelfSigned(current.Cert) {
+			if IsSelfSigned(current.Cert) {
 				break
 			}
 
@@ -82,7 +82,7 @@ func BuildChain(certs []*Info) ([]*Info, error) {
 
 	for i, c := range longestChain {
 		c.Position = i
-		c.Type = getCertType(c.Cert, i, len(longestChain))
+		c.Type = GetCertType(c.Cert, i, len(longestChain))
 	}
 
 	return longestChain, nil

@@ -45,6 +45,13 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 	root.Flags().CountVarP(&opts.Verbosity, "verbose", "v", "Increase output detail: -v shows passed, -vv includes skipped")
 	root.Flags().BoolVar(&opts.ShowMeta, "show-meta", true, "Show lint meta information")
 
+	// Auto-validate mode flags
+	root.Flags().BoolVar(&opts.AutoValidate, "auto-validate", false, "Enable automatic PKI resource fetching (OCSP, CRL, chain climbing)")
+	root.Flags().BoolVar(&opts.AutoValidateOCSP, "auto-ocsp-chain", true, "Fetch OCSP for all certificates in chain (only with --auto-validate)")
+	root.Flags().BoolVar(&opts.AutoValidateCRL, "auto-crl", true, "Fetch CRLs from CRL Distribution Points (only with --auto-validate)")
+	root.Flags().BoolVar(&opts.AutoValidateChain, "auto-chain", true, "Climb chain via CA Issuers URLs (only with --auto-validate)")
+	root.Flags().IntVar(&opts.MaxChainDepth, "max-chain-depth", 10, "Maximum chain depth for climbing (only with --auto-validate)")
+
 	return root
 }
 
