@@ -51,52 +51,117 @@ Policies are YAML files defining validation rules with a simple declarative synt
 
 ```yaml
 id: rfc5280
+version: 1.0
+
 rules:
-  - id: version-v3
+  # -------------------------------------------------
+  # Certificate structure (Section 4.1)
+  # -------------------------------------------------
+
+  # Version MUST be 3 when extensions are present
+  - id: version-v3-when-extensions
+    reference: RFC5280 4.1.2.1
+    when:
+      target: certificate.extensions
+      operator: present
     target: certificate.version
     operator: eq
     operands: [3]
     severity: error
 
-  - id: signature-algorithm-secure
-    target: certificate.signatureAlgorithm.algorithm
-    operator: in
-    operands:
-      - SHA256-RSA
-      - SHA384-RSA
-      - ECDSA-SHA256
+  # Serial number MUST be positive integer
+  - id: serial-number-positive
+    reference: RFC5280 4.1.2.2
+    target: certificate.serialNumber.value
+    operator: positive
     severity: error
 
-  # Conditional rule using "when" clause
-  - id: rsa-key-size-minimum
-    when:
-      target: certificate.subjectPublicKeyInfo.algorithm
-      operator: eq
-      operands: [RSA]
-    target: certificate.subjectPublicKeyInfo.publicKey.keySize
-    operator: gte
-    operands: [2048]
+  # Serial number uniqueness in chain
+  - id: serial-number-unique
+    reference: RFC5280 4.1.2.2
+    target: certificate
+    operator: serialNumberUnique
     severity: error
+
+  # -------------------------------------------------
+  # Signature validation (Section 4.1.2.3)
+  # -------------------------------------------------
+
+  - id: signature-valid
+    reference: RFC5280 4.1.2.3
+    target: certificate
+    operator: signatureValid
+    severity: error
+
+  - id: signature-algorithm-matches-tbs
+    reference: RFC5280 4.1.2.3
+    target: certificate
+    operator: signatureAlgorithmMatchesTBS
+    severity: error
+
+  # -------------------------------------------------
+  # Basic Constraints (Section 4.2.1.9)
+  # -------------------------------------------------
 
   - id: ca-basic-constraints
+    reference: RFC5280 4.2.1.9
     target: certificate.basicConstraints.cA
     operator: eq
     operands: [true]
     severity: error
     appliesTo: [root, intermediate]
 
-  # Severity levels: error, warning, info
-  - id: ca-issuers-url-recommended
-    target: certificate.caIssuersURL
-    operator: present
-    severity: info  # Best practice recommendation (blue in output)
-    appliesTo: [leaf]
+  # -------------------------------------------------
+  # Key Usage (Section 4.2.1.3)
+  # -------------------------------------------------
 
-  # Optional document reference (used by text output)
-  - id: key-usage-leaf
+  - id: key-usage-ca
     reference: RFC5280 4.2.1.3
     target: certificate.keyUsage
-    operator: keyUsageLeaf
+    operator: keyUsageCA
+    severity: error
+    appliesTo: [root, intermediate]
+
+  # -------------------------------------------------
+  # AIA Extension - Best Practice (INFO severity)
+  # -------------------------------------------------
+
+  - id: leaf-ca-issuers-url-recommended
+    reference: RFC5280 4.2.2.1
+    target: certificate.caIssuersURL
+    operator: present
+    severity: info
+    appliesTo: [leaf]
+
+  # -------------------------------------------------
+  # Subject Alternative Name (Section 4.2.1.6)
+  # -------------------------------------------------
+
+  - id: san-required-if-empty-subject
+    reference: RFC5280 4.2.1.6
+    when:
+      target: certificate.subject
+      operator: isEmpty
+    target: certificate.subjectAltName
+    operator: present
+    severity: error
+
+  # -------------------------------------------------
+  # Conditional RSA validation (RFC 4055)
+  # -------------------------------------------------
+
+  - id: rsa-params-null
+    reference: RFC4055 Section 5
+    when:
+      target: certificate.signatureAlgorithm.oid
+      operator: in
+      operands:
+        - "1.2.840.113549.1.1.11"  # sha256WithRSAEncryption
+        - "1.2.840.113549.1.1.12"  # sha384WithRSAEncryption
+        - "1.2.840.113549.1.1.13"  # sha512WithRSAEncryption
+    target: certificate.signatureAlgorithm.parameters.null
+    operator: eq
+    operands: [true]
     severity: error
 ```
 
@@ -200,17 +265,41 @@ rules:
 Rules can include a `when` clause to apply only when certain conditions are met:
 
 ```yaml
-- id: rsa-exponent-valid
+# Only validate RSA key size when certificate uses RSA algorithm
+- id: rsa-key-size-minimum
+  reference: RFC4055
   when:
-    target: certificate.subjectPublicKeyInfo.algorithm
+    target: certificate.subjectPublicKeyInfo.algorithm.algorithm
     operator: eq
     operands: [RSA]
-  target: certificate.subjectPublicKeyInfo.publicKey.exponent
-  operator: odd
+  target: certificate.subjectPublicKeyInfo.publicKey.keySize
+  operator: gte
+  operands: [2048]
   severity: error
+
+# Only check SAN when subject is empty (RFC 5280 4.2.1.6)
+- id: san-required-if-empty-subject
+  reference: RFC5280 4.2.1.6
+  when:
+    target: certificate.subject
+    operator: isEmpty
+  target: certificate.subjectAltName
+  operator: present
+  severity: error
+
+# EV certificate MUST have SCT (only applies to EV certs)
+- id: ev-sct-required
+  reference: CA/Browser Forum BR Appendix B
+  when:
+    target: certificate.certificatePolicies.2.23.140.1.1
+    operator: present
+  target: certificate.signedCertificateTimestamps
+  operator: present
+  severity: warning
+  appliesTo: [leaf]
 ```
 
-This rule only validates RSA exponent when the certificate uses RSA. If the condition is not met, the rule is skipped.
+When the `when` condition is not met, the rule status is **SKIP** (not displayed by default, use `-vv` to see).
 
 ## ⚠️ Severity Levels
 
@@ -243,6 +332,101 @@ Policies are automatically filtered by input type based on rule targets:
 - Rules with `ocsp.*` targets → applied to OCSP responses
 
 This allows mixed policies to validate different PKI components independently. Use `appliesTo` to explicitly specify input types: `cert`, `crl`, `ocsp`.
+
+## 🌳 Node Tree Structure
+
+Rules target fields using a dot-separated path notation. The node tree structure mirrors the certificate/CRL/OCSP structure:
+
+### Certificate Node Tree
+
+```
+certificate
+├── version                 # Integer (1, 2, 3)
+├── serialNumber
+│   ├── value              # String representation
+│   └── ...                # Raw bytes
+├── signatureAlgorithm
+│   ├── algorithm          # String name (e.g., "SHA256-RSA")
+│   ├── oid                # OID string
+│   └── parameters
+│       ├── null           # Boolean (true if NULL)
+│       ├── absent         # Boolean (true if omitted)
+│       └── pss/oaep       # PSS/OAEP parameters (if present)
+├── tbsSignatureAlgorithm  # Same structure as signatureAlgorithm
+├── issuer / subject
+│   ├── countryName
+│   ├── organizationName
+│   ├── commonName
+│   └── ...
+├── validity
+│   ├── notBefore          # time.Time
+│   ├── notAfter           # time.Time
+├── subjectPublicKeyInfo
+│   ├── algorithm
+│   │   ├── algorithm      # String (RSA, ECDSA)
+│   │   ├── oid            # OID string
+│   └── publicKey
+│       ├── keySize        # Integer
+│       ├── exponent       # RSA exponent
+│       ├── curve          # ECDSA curve name
+├── extensions
+│   ├── <oid>              # Each extension keyed by OID
+│   │   ├── oid
+│   │   ├── critical       # Boolean
+│   │   └── value          # Raw bytes
+├── basicConstraints
+│   ├── cA                 # Boolean
+│   ├── pathLenConstraint  # Integer (if present)
+├── keyUsage               # Integer bitmask
+│   ├── digitalSignature   # Boolean (per bit)
+│   ├── keyCertSign        # Boolean
+│   └── ...
+├── extKeyUsage
+│   ├── serverAuth         # Boolean
+│   ├── clientAuth         # Boolean
+│   └── ...
+├── subjectKeyIdentifier   # Bytes
+├── authorityKeyIdentifier # Bytes
+├── subjectAltName
+│   ├── dNSName
+│   ├── iPAddress
+│   └── ...
+├── caIssuersURL           # String (first CA Issuers URL)
+├── ocspURL                # String (first OCSP URL)
+├── cRLDistributionPoints  # Array of URLs
+├── signedCertificateTimestamps  # SCT list
+└── certificatePolicies    # Policy OIDs keyed by OID string
+```
+
+### CRL Node Tree
+
+```
+crl
+├── version
+├── signatureAlgorithm     # Same as certificate
+├── issuer                 # Same as certificate
+├── thisUpdate             # time.Time
+├── nextUpdate             # time.Time
+├── revokedCertificates
+│   ├── <serial>           # Each revoked cert
+│   │   ├── serialNumber
+│   │   ├── revocationDate
+│   │   ├── revocationReason
+└── extensions
+    └── ...
+```
+
+### OCSP Node Tree
+
+```
+ocsp
+├── status                 # String (Good, Revoked, Unknown)
+├── producedAt             # time.Time
+├── thisUpdate             # time.Time
+├── nextUpdate             # time.Time
+├── revocationReason       # Integer (if revoked)
+└── signatureAlgorithm     # Same as certificate
+```
 
 ## 🔧 Development
 
