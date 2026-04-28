@@ -6,6 +6,7 @@ import (
 
 	"github.com/zmap/zcrypto/x509"
 
+	"github.com/cavoq/PCL/internal/asn1"
 	"github.com/cavoq/PCL/internal/node"
 	"github.com/cavoq/PCL/internal/zcrypto"
 )
@@ -36,6 +37,7 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 	}
 
 	root.Children["signatureAlgorithm"] = buildSignatureAlgorithm(cert)
+	root.Children["tbsSignatureAlgorithm"] = buildTBSSignatureAlgorithm(cert)
 	root.Children["issuer"] = zcrypto.BuildPkixName("issuer", cert.Issuer)
 	root.Children["validity"] = buildValidity(cert)
 	root.Children["subject"] = zcrypto.BuildPkixName("subject", cert.Subject)
@@ -88,6 +90,70 @@ func buildSignatureAlgorithm(cert *x509.Certificate) *node.Node {
 	if len(cert.SignatureAlgorithmOID) > 0 {
 		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
 	}
+	n.Children["parameters"] = buildAlgorithmIDParams(ParseCertSignatureAlgorithmParams(cert.Raw))
+	return n
+}
+
+func buildTBSSignatureAlgorithm(cert *x509.Certificate) *node.Node {
+	n := node.New("tbsSignatureAlgorithm", nil)
+	n.Children["algorithm"] = node.New("algorithm", cert.SignatureAlgorithm.String())
+	if len(cert.SignatureAlgorithmOID) > 0 {
+		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
+	}
+	n.Children["parameters"] = buildAlgorithmIDParams(ParseTBSCertSignatureParams(cert.RawTBSCertificate))
+	return n
+}
+
+func buildAlgorithmIDParams(params asn1.ParamsState) *node.Node {
+	n := node.New("parameters", nil)
+	n.Children["null"] = node.New("null", params.IsNull)
+	n.Children["absent"] = node.New("absent", params.IsAbsent)
+
+	if params.PSS != nil {
+		n.Children["pss"] = buildPSSParams(params.PSS)
+	}
+
+	if params.OAEP != nil {
+		n.Children["oaep"] = buildOAEPParams(params.OAEP)
+	}
+
+	return n
+}
+
+func buildPSSParams(pss *asn1.PSSParams) *node.Node {
+	n := node.New("pss", nil)
+
+	n.Children["hashAlgorithm"] = buildNestedAlgorithmID(pss.HashAlgorithm)
+	n.Children["hashAlgorithmSet"] = node.New("hashAlgorithmSet", pss.HashAlgorithmSet)
+	n.Children["maskGenAlgorithm"] = buildNestedAlgorithmID(pss.MaskGenAlgorithm)
+	n.Children["maskGenAlgorithmSet"] = node.New("maskGenAlgorithmSet", pss.MaskGenAlgorithmSet)
+	n.Children["saltLength"] = node.New("saltLength", pss.SaltLength)
+	n.Children["saltLengthSet"] = node.New("saltLengthSet", pss.SaltLengthSet)
+	n.Children["trailerField"] = node.New("trailerField", pss.TrailerField)
+	n.Children["trailerFieldSet"] = node.New("trailerFieldSet", pss.TrailerFieldSet)
+
+	return n
+}
+
+func buildOAEPParams(oaep *asn1.OAEPParams) *node.Node {
+	n := node.New("oaep", nil)
+
+	n.Children["hashAlgorithm"] = buildNestedAlgorithmID(oaep.HashAlgorithm)
+	n.Children["hashAlgorithmSet"] = node.New("hashAlgorithmSet", oaep.HashAlgorithmSet)
+	n.Children["maskGenAlgorithm"] = buildNestedAlgorithmID(oaep.MaskGenAlgorithm)
+	n.Children["maskGenAlgorithmSet"] = node.New("maskGenAlgorithmSet", oaep.MaskGenAlgorithmSet)
+	n.Children["pSourceAlgorithm"] = buildNestedAlgorithmID(oaep.PSourceAlgorithm)
+	n.Children["pSourceAlgorithmSet"] = node.New("pSourceAlgorithmSet", oaep.PSourceAlgorithmSet)
+
+	return n
+}
+
+func buildNestedAlgorithmID(algo asn1.AlgorithmIdentifier) *node.Node {
+	n := node.New("algorithm", nil)
+	n.Children["oid"] = node.New("oid", algo.OID)
+	if algo.Params.OID != "" {
+		n.Children["parameters"] = buildAlgorithmIDParams(algo.Params)
+	}
 	return n
 }
 
@@ -106,6 +172,7 @@ func buildSubjectPublicKeyInfo(cert *x509.Certificate) *node.Node {
 	if len(cert.PublicKeyAlgorithmOID) > 0 {
 		algo.Children["oid"] = node.New("oid", cert.PublicKeyAlgorithmOID.String())
 	}
+	algo.Children["parameters"] = buildAlgorithmIDParams(ParseSubjectPublicKeyInfoParams(cert.RawSubjectPublicKeyInfo))
 	n.Children["algorithm"] = algo
 
 	if cert.PublicKey != nil {

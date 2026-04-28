@@ -58,4 +58,6 @@ var All = []Operator{
 	OCSPGood{},
 	NameConstraintsValid{},
 	CertificatePolicyValid{},
+	IsNull{},
+	IsAbsent{},
 }

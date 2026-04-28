@@ -18,8 +18,8 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 			if opts.PolicyPath == "" {
 				return fmt.Errorf("--policy is required")
 			}
-			if opts.CertPath == "" && len(opts.CertURLs) == 0 {
-				return fmt.Errorf("--cert or --cert-url is required")
+			if opts.CertPath == "" && len(opts.CertURLs) == 0 && opts.CRLPath == "" && opts.OCSPPath == "" {
+				return fmt.Errorf("at least one of --cert, --cert-url, --crl, or --ocsp is required")
 			}
 			return linter.Run(*opts, cmd.OutOrStdout())
 		},

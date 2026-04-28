@@ -8,6 +8,7 @@ import (
 	"github.com/cavoq/PCL/internal/cert"
 	"github.com/cavoq/PCL/internal/cert/zcrypto"
 	"github.com/cavoq/PCL/internal/crl"
+	crlzcrypto "github.com/cavoq/PCL/internal/crl/zcrypto"
 	"github.com/cavoq/PCL/internal/ocsp"
 	"github.com/cavoq/PCL/internal/operator"
 	"github.com/cavoq/PCL/internal/output"
@@ -26,49 +27,98 @@ func Run(cfg Config, w io.Writer) error {
 		policies = append(policies, p)
 	}
 
-	certs, cleanup, err := loadCertificates(cfg)
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if err != nil {
-		return err
-	}
+	reg := operator.DefaultRegistry()
+	var results []policy.Result
 
-	chain, err := cert.BuildChain(certs)
-	if err != nil {
-		return fmt.Errorf("failed to build chain: %w", err)
-	}
-
-	var ctxOpts []operator.ContextOption
-
+	// Load CRLs if provided
+	var crls []*crl.Info
 	if cfg.CRLPath != "" {
-		crls, err := crl.GetCRLs(cfg.CRLPath)
+		crls, err = crl.GetCRLs(cfg.CRLPath)
 		if err != nil {
 			return fmt.Errorf("failed to load CRLs: %w", err)
 		}
-		ctxOpts = append(ctxOpts, operator.WithCRLs(crls))
 	}
 
+	// Load OCSP if provided
+	var ocsps []*ocsp.Info
 	if cfg.OCSPPath != "" {
-		ocsps, err := ocsp.GetOCSPs(cfg.OCSPPath)
+		ocsps, err = ocsp.GetOCSPs(cfg.OCSPPath)
 		if err != nil {
 			return fmt.Errorf("failed to load OCSP responses: %w", err)
 		}
-		ctxOpts = append(ctxOpts, operator.WithOCSPs(ocsps))
 	}
 
-	reg := operator.DefaultRegistry()
-
-	var results []policy.Result
-
-	for _, c := range chain {
-		tree := zcrypto.BuildTree(c.Cert)
-		ctx := operator.NewEvaluationContext(tree, c, chain, ctxOpts...)
-
-		for _, p := range policies {
-			res := policy.Evaluate(p, tree, reg, ctx)
-			results = append(results, res)
+	// Process certificates if provided
+	if cfg.CertPath != "" || len(cfg.CertURLs) > 0 {
+		certs, cleanup, err := loadCertificates(cfg)
+		if cleanup != nil {
+			defer cleanup()
 		}
+		if err != nil {
+			return err
+		}
+
+		chain, err := cert.BuildChain(certs)
+		if err != nil {
+			return fmt.Errorf("failed to build chain: %w", err)
+		}
+
+		for _, c := range chain {
+			tree := zcrypto.BuildTree(c.Cert)
+
+			// Add CRL node to tree if CRLs are present
+			if len(crls) > 0 {
+				for _, crlInfo := range crls {
+					if crlInfo.CRL != nil {
+						crlNode := crlzcrypto.BuildTree(crlInfo.CRL)
+						if crlNode != nil {
+							tree.Children["crl"] = crlNode
+						}
+						break
+					}
+				}
+			}
+
+			ctxOpts := []operator.ContextOption{
+				operator.WithCRLs(crls),
+				operator.WithOCSPs(ocsps),
+			}
+			ctx := operator.NewEvaluationContext(tree, c, chain, ctxOpts...)
+
+			for _, p := range policies {
+				res := policy.Evaluate(p, tree, reg, ctx)
+				results = append(results, res)
+			}
+		}
+	} else if len(crls) > 0 {
+		// Process CRLs independently when no certificates provided
+		for _, crlInfo := range crls {
+			if crlInfo.CRL == nil {
+				continue
+			}
+
+			crlNode := crlzcrypto.BuildTree(crlInfo.CRL)
+			if crlNode == nil {
+				continue
+			}
+
+			// Create a minimal tree with just the CRL
+			tree := crlNode
+
+			ctxOpts := []operator.ContextOption{operator.WithCRLs(crls)}
+			ctx := operator.NewEvaluationContext(tree, nil, nil, ctxOpts...)
+
+			for _, p := range policies {
+				res := policy.Evaluate(p, tree, reg, ctx)
+				results = append(results, res)
+			}
+		}
+	} else if len(ocsps) > 0 {
+		// Process OCSP independently when no certificates/CRLs provided
+		// TODO: Add OCSP-only evaluation if needed
+		return fmt.Errorf("OCSP-only evaluation requires a certificate")
+	} else {
+		return fmt.Errorf("no certificates, CRLs, or OCSP responses provided")
 	}
 
 	outputOpts := output.Options{
