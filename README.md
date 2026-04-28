@@ -16,7 +16,30 @@ pcl --policy <path> --cert <path> [--crl <path>] [--ocsp <path>] [--output text|
 
 By default, only failed rules are shown. Use `-v` to include passed rules and `-vv` to include skipped rules.
 
-You can also fetch a TLS certificate chain from HTTPS URLs:
+### Auto-Validate Mode
+
+Automatically fetch PKI resources from certificate extensions (OCSP, CRL, CA Issuers) and climb the certificate chain:
+
+```bash
+pcl --policy <path> --cert leaf.pem --auto-validate
+```
+
+This mode:
+- **Chain Climbing**: Recursively fetches issuer certificates via CA Issuers URLs
+- **PKCS#7 Support**: Parses `.p7c` certificate bundles per RFC 5280/5652
+- **Auto OCSP/CRL**: Fetches revocation information from AIA extensions
+- **Issuer Matching**: Handles multi-certificate bundles by matching Issuer DN and AKI-SKI
+
+Options for granular control:
+```bash
+pcl --policy <path> --cert leaf.pem --auto-validate --max-chain-depth 5
+pcl --policy <path> --cert leaf.pem --auto-validate --no-auto-crl
+pcl --policy <path> --cert leaf.pem --auto-validate --no-auto-ocsp
+```
+
+### Fetch TLS Certificates from URLs
+
+Fetch certificate chains from HTTPS endpoints:
 
 ```bash
 pcl --policy <path> --cert-url https://example.test --cert-url-timeout 10s --cert-url-save-dir ./downloads
@@ -62,6 +85,13 @@ rules:
     severity: error
     appliesTo: [root, intermediate]
 
+  # Severity levels: error, warning, info
+  - id: ca-issuers-url-recommended
+    target: certificate.caIssuersURL
+    operator: present
+    severity: info  # Best practice recommendation (blue in output)
+    appliesTo: [leaf]
+
   # Optional document reference (used by text output)
   - id: key-usage-leaf
     reference: RFC5280 4.2.1.3
@@ -72,7 +102,9 @@ rules:
 
 ## 🏛️ Supported Policies
 
-- [RFC 5280](https://datatracker.ietf.org/doc/html/rfc5280) - Internet X.509 Public Key Infrastructure Certificate and Certificate Revocation List (CRL) Profile
+- [RFC 5280](https://datatracker.ietf.org/doc/html/rfc5280) - Internet X.509 Public Key Infrastructure Certificate and CRL Profile
+- [RFC 4055](https://datatracker.ietf.org/doc/html/rfc4055) - Additional Algorithms and Identifiers for RSA Cryptography
+- [RFC 6960](https://datatracker.ietf.org/doc/html/rfc6960) - Online Certificate Status Protocol (OCSP)
 
 
 ## ➕ Supported Operators
@@ -180,6 +212,18 @@ Rules can include a `when` clause to apply only when certain conditions are met:
 
 This rule only validates RSA exponent when the certificate uses RSA. If the condition is not met, the rule is skipped.
 
+## ⚠️ Severity Levels
+
+PCL supports three severity levels:
+
+| Level | Color | Description |
+|-------|-------|-------------|
+| `error` | Red | Mandatory compliance requirement |
+| `warning` | Yellow | Important best practice or conditional requirement |
+| `info` | Blue | Recommended best practice (non-blocking) |
+
+Example: EV certificates should have SCT embedded (warning), while AIA extension presence is recommended (info) for interoperability.
+
 ## Certificate Chain Support
 
 PCL automatically builds and validates certificate chains, applying rules based on certificate position:
@@ -189,6 +233,16 @@ PCL automatically builds and validates certificate chains, applying rules based 
 - `root`: Self-signed root CA certificates
 
 Use `appliesTo` in rules to target specific certificate types.
+
+## 📥 Input Type Filtering
+
+Policies are automatically filtered by input type based on rule targets:
+
+- Rules with `certificate.*` targets → applied to X.509 certificates
+- Rules with `crl.*` targets → applied to CRLs
+- Rules with `ocsp.*` targets → applied to OCSP responses
+
+This allows mixed policies to validate different PKI components independently. Use `appliesTo` to explicitly specify input types: `cert`, `crl`, `ocsp`.
 
 ## 🔧 Development
 
