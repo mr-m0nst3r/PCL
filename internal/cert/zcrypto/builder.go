@@ -3,6 +3,7 @@ package zcrypto
 import (
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"fmt"
 
 	"github.com/zmap/zcrypto/x509"
 
@@ -79,6 +80,20 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 
 	if len(cert.Signature) > 0 {
 		root.Children["signatureValue"] = node.New("signatureValue", cert.Signature)
+	}
+
+	// Add OCSP URL from AIA extension
+	if len(cert.OCSPServer) > 0 {
+		root.Children["ocspURL"] = node.New("ocspURL", cert.OCSPServer[0])
+	}
+
+	// Add CRL Distribution Points
+	if len(cert.CRLDistributionPoints) > 0 {
+		crlDPNode := node.New("cRLDistributionPoints", nil)
+		for i, uri := range cert.CRLDistributionPoints {
+			crlDPNode.Children[fmt.Sprintf("%d", i)] = node.New(fmt.Sprintf("%d", i), uri)
+		}
+		root.Children["cRLDistributionPoints"] = crlDPNode
 	}
 
 	return root
@@ -196,7 +211,9 @@ func buildKeyUsage(ku x509.KeyUsage) *node.Node {
 		n.Children["digitalSignature"] = node.New("digitalSignature", true)
 	}
 	if ku&x509.KeyUsageContentCommitment != 0 {
+		// Both names for the same bit: contentCommitment (RFC name) and nonRepudiation (common name)
 		n.Children["contentCommitment"] = node.New("contentCommitment", true)
+		n.Children["nonRepudiation"] = node.New("nonRepudiation", true)
 	}
 	if ku&x509.KeyUsageKeyEncipherment != 0 {
 		n.Children["keyEncipherment"] = node.New("keyEncipherment", true)

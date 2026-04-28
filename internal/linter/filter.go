@@ -1,0 +1,270 @@
+package linter
+
+import (
+	"slices"
+
+	"github.com/zmap/zcrypto/x509"
+
+	"github.com/cavoq/PCL/internal/policy"
+)
+
+// OID constants for CRL extensions
+const (
+	oidDeltaCRLIndicator        = "2.5.29.27"
+	oidIssuingDistributionPoint = "2.5.29.29"
+)
+
+// AppliesTo types - fixed enumeration for PKI input types
+const (
+	AppliesToCert     = "cert"
+	AppliesToCRL      = "crl"
+	AppliesToOCSP     = "ocsp"
+	AppliesToTST      = "tst"
+	AppliesToSCT      = "sct"
+	AppliesToAttrCert = "attrCert"
+)
+
+// OID name mappings for human-readable certType/crlType values
+var oidNameMap = map[string]string{
+	// Extended Key Usage OIDs
+	"serverAuth":        "1.3.6.1.5.5.7.3.1",
+	"clientAuth":        "1.3.6.1.5.5.7.3.2",
+	"codeSigning":       "1.3.6.1.5.5.7.3.3",
+	"emailProtection":   "1.3.6.1.5.5.7.3.4",
+	"timeStamping":      "1.3.6.1.5.5.7.3.8",
+	"ocspSigning":       "1.3.6.1.5.5.7.3.9",
+	"1.3.6.1.5.5.7.3.1": "serverAuth",
+	"1.3.6.1.5.5.7.3.2": "clientAuth",
+	"1.3.6.1.5.5.7.3.3": "codeSigning",
+	"1.3.6.1.5.5.7.3.4": "emailProtection",
+	"1.3.6.1.5.5.7.3.8": "timeStamping",
+	"1.3.6.1.5.5.7.3.9": "ocspSigning",
+
+	// CRL extension OIDs
+	"deltaCRLIndicator":        "2.5.29.27",
+	"issuingDistributionPoint": "2.5.29.29",
+	"2.5.29.27":                "deltaCRLIndicator",
+	"2.5.29.29":                "issuingDistributionPoint",
+
+	// Built-in cert types
+	"ca":  "ca",
+	"leaf": "leaf",
+}
+
+// normalizeOID converts human-readable name to OID or returns the OID if already an OID
+func normalizeOID(nameOrOID string) string {
+	if oid, ok := oidNameMap[nameOrOID]; ok {
+		// If input is a name, return the OID
+		if len(oid) > 10 && oid[0:4] != "ca" && oid[0:4] != "leaf" {
+			return oid
+		}
+	}
+	// Input might already be an OID or a built-in type
+	return nameOrOID
+}
+
+// policyAppliesToInput checks if a policy applies to the given input type
+func policyAppliesToInput(p policy.Policy, inputType string) bool {
+	// If AppliesTo is empty, apply to all (backward compatible)
+	if len(p.AppliesTo) == 0 {
+		return true
+	}
+	return slices.Contains(p.AppliesTo, inputType)
+}
+
+// policyAppliesToCert checks if a policy applies to a specific certificate
+func policyAppliesToCert(p policy.Policy, cert *x509.Certificate) bool {
+	// Check input type first
+	if !policyAppliesToInput(p, AppliesToCert) {
+		return false
+	}
+
+	// If no certType filter, applies to all certs
+	if len(p.CertType) == 0 {
+		return true
+	}
+
+	// Check each certType constraint
+	for _, ct := range p.CertType {
+		ct = normalizeOID(ct)
+
+		// Built-in types
+		if ct == "ca" {
+			if cert.BasicConstraintsValid && cert.IsCA {
+				return true
+			}
+			continue
+		}
+		if ct == "leaf" {
+			if !cert.BasicConstraintsValid || !cert.IsCA {
+				return true
+			}
+			continue
+		}
+
+		// EKU OID check
+		for _, eku := range cert.ExtKeyUsage {
+			ekuOID := extKeyUsageToOID(eku)
+			if ekuOID == ct {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// policyAppliesToCRL checks if a policy applies to a specific CRL
+func policyAppliesToCRL(p policy.Policy, hasDeltaIndicator bool, isIndirectCRL bool) bool {
+	// Check input type first
+	if !policyAppliesToInput(p, AppliesToCRL) {
+		return false
+	}
+
+	// If no crlType filter, applies to all CRLs
+	if len(p.CRLType) == 0 {
+		return true
+	}
+
+	// Check each crlType constraint
+	for _, ct := range p.CRLType {
+		ct = normalizeOID(ct)
+
+		if ct == "deltaCRLIndicator" || ct == "2.5.29.27" {
+			if hasDeltaIndicator {
+				return true
+			}
+			continue
+		}
+
+		if ct == "indirectCRL" {
+			if isIndirectCRL {
+				return true
+			}
+			continue
+		}
+
+		if ct == "completeCRL" {
+			if !hasDeltaIndicator {
+				return true
+			}
+			continue
+		}
+	}
+
+	return false
+}
+
+// policyAppliesToOCSP checks if a policy applies to OCSP responses
+func policyAppliesToOCSP(p policy.Policy) bool {
+	return policyAppliesToInput(p, AppliesToOCSP)
+}
+
+// extKeyUsageToOID converts x509.ExtKeyUsage to OID string
+func extKeyUsageToOID(eku x509.ExtKeyUsage) string {
+	switch eku {
+	case x509.ExtKeyUsageServerAuth:
+		return "1.3.6.1.5.5.7.3.1"
+	case x509.ExtKeyUsageClientAuth:
+		return "1.3.6.1.5.5.7.3.2"
+	case x509.ExtKeyUsageCodeSigning:
+		return "1.3.6.1.5.5.7.3.3"
+	case x509.ExtKeyUsageEmailProtection:
+		return "1.3.6.1.5.5.7.3.4"
+	case x509.ExtKeyUsageTimeStamping:
+		return "1.3.6.1.5.5.7.3.8"
+	case x509.ExtKeyUsageOcspSigning:
+		return "1.3.6.1.5.5.7.3.9"
+	default:
+		return ""
+	}
+}
+
+// hasDeltaCRLIndicator checks if CRL has the delta CRL indicator extension
+func hasDeltaCRLIndicator(crl *x509.RevocationList) bool {
+	if crl == nil {
+		return false
+	}
+	for _, ext := range crl.Extensions {
+		if ext.Id.String() == oidDeltaCRLIndicator {
+			return true
+		}
+	}
+	return false
+}
+
+// isIndirectCRL checks if CRL is an indirect CRL (issued by different CA)
+// Indirect CRL is indicated when the CRL issuer differs from the certificate issuer.
+// This can be detected via the IssuingDistributionPoint extension's indirectCRL field.
+func isIndirectCRL(crl *x509.RevocationList) bool {
+	if crl == nil {
+		return false
+	}
+	for _, ext := range crl.Extensions {
+		if ext.Id.String() == oidIssuingDistributionPoint {
+			// The indirectCRL field is a boolean in the IssuingDistributionPoint extension
+			// If the extension is present, we check the raw value for indirectCRL indicator
+			// The ASN.1 structure includes an optional indirectCRL BOOLEAN DEFAULT FALSE
+			// Parsing this requires decoding the extension value
+			return checkIndirectCRLInExtension(ext.Value)
+		}
+	}
+	return false
+}
+
+// checkIndirectCRLInExtension parses the IssuingDistributionPoint extension to find indirectCRL field
+func checkIndirectCRLInExtension(extValue []byte) bool {
+	// IssuingDistributionPoint ASN.1 structure (RFC 5280):
+	// IssuingDistributionPoint ::= SEQUENCE {
+	//   distributionPoint          [0] DistributionPointName OPTIONAL,
+	//   onlyContainsUserCerts      [1] BOOLEAN DEFAULT FALSE,
+	//   onlyContainsCACerts        [2] BOOLEAN DEFAULT FALSE,
+	//   onlySomeReasons            [3] ReasonFlags OPTIONAL,
+	//   indirectCRL                [4] BOOLEAN DEFAULT FALSE,
+	//   onlyContainsAttributeCerts [5] BOOLEAN DEFAULT FALSE
+	// }
+	// We need to check if the [4] indirectCRL field is present and TRUE
+	// The tag for indirectCRL is context-specific [4] which is 0x84 in DER
+	for i := 0; i < len(extValue)-1; i++ {
+		if extValue[i] == 0x84 { // context-specific tag [4] for indirectCRL
+			// Next byte should be the length (typically 1 for BOOLEAN TRUE)
+			if extValue[i+1] == 0x01 && i+2 < len(extValue) {
+				return extValue[i+2] == 0xFF // TRUE in ASN.1 DER
+			}
+		}
+	}
+	return false
+}
+
+// filterPoliciesByInput returns policies that apply to the given input type
+func filterPoliciesByInput(policies []policy.Policy, inputType string) []policy.Policy {
+	var filtered []policy.Policy
+	for _, p := range policies {
+		if policyAppliesToInput(p, inputType) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// filterPoliciesByCert returns policies that apply to the given certificate
+func filterPoliciesByCert(policies []policy.Policy, cert *x509.Certificate) []policy.Policy {
+	var filtered []policy.Policy
+	for _, p := range policies {
+		if policyAppliesToCert(p, cert) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// filterPoliciesByCRL returns policies that apply to the given CRL
+func filterPoliciesByCRL(policies []policy.Policy, hasDeltaIndicator bool, isIndirectCRL bool) []policy.Policy {
+	var filtered []policy.Policy
+	for _, p := range policies {
+		if policyAppliesToCRL(p, hasDeltaIndicator, isIndirectCRL) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}

@@ -18,8 +18,13 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 			if opts.PolicyPath == "" {
 				return fmt.Errorf("--policy is required")
 			}
-			if opts.CertPath == "" && len(opts.CertURLs) == 0 && opts.CRLPath == "" && opts.OCSPPath == "" {
-				return fmt.Errorf("at least one of --cert, --cert-url, --crl, or --ocsp is required")
+			hasCert := opts.CertPath != "" || len(opts.CertURLs) > 0
+			hasIssuer := len(opts.IssuerPaths) > 0 || len(opts.IssuerURLs) > 0
+			if !hasCert && !hasIssuer && opts.CRLPath == "" && opts.OCSPPath == "" {
+				return fmt.Errorf("at least one of --cert, --cert-url, --issuer, --issuer-url, --crl, or --ocsp is required")
+			}
+			if opts.AutoOCSP && !hasIssuer {
+				return fmt.Errorf("--auto-ocsp requires --issuer or --issuer-url")
 			}
 			return linter.Run(*opts, cmd.OutOrStdout())
 		},
@@ -30,8 +35,12 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 	root.Flags().StringSliceVar(&opts.CertURLs, "cert-url", nil, "Certificate URL (repeatable)")
 	root.Flags().DurationVar(&opts.CertTimeout, "cert-url-timeout", 10*time.Second, "Certificate URL timeout (e.g. 10s, 1m)")
 	root.Flags().StringVar(&opts.CertSaveDir, "cert-url-save-dir", "", "Directory to save downloaded certs (optional)")
+	root.Flags().StringSliceVar(&opts.IssuerPaths, "issuer", nil, "Path to issuer certificate file or directory (repeatable, PEM/DER)")
+	root.Flags().StringSliceVar(&opts.IssuerURLs, "issuer-url", nil, "Issuer certificate URL (repeatable)")
 	root.Flags().StringVar(&opts.CRLPath, "crl", "", "Path to CRL file or directory (PEM/DER)")
 	root.Flags().StringVar(&opts.OCSPPath, "ocsp", "", "Path to OCSP response file or directory (DER/PEM)")
+	root.Flags().BoolVar(&opts.AutoOCSP, "auto-ocsp", false, "Automatically fetch OCSP response from certificate's AIA extension (requires issuer)")
+	root.Flags().DurationVar(&opts.OCSPTimeout, "ocsp-url-timeout", 5*time.Second, "OCSP request timeout (e.g. 5s, 10s)")
 	root.Flags().StringVar(&opts.OutputFmt, "output", "text", "Output format: text, json, or yaml")
 	root.Flags().CountVarP(&opts.Verbosity, "verbose", "v", "Increase output detail: -v shows passed, -vv includes skipped")
 	root.Flags().BoolVar(&opts.ShowMeta, "show-meta", true, "Show lint meta information")

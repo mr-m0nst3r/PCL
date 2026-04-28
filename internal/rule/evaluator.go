@@ -58,7 +58,27 @@ func Evaluate(
 		}
 	}
 
-	n, _ := root.Resolve(r.Target)
+	n, found := root.Resolve(r.Target)
+
+	// For presence/absence operators, continue evaluation even if target not found
+	// present: returns false when target not found (expected behavior)
+	// absent: returns true when target not found (expected behavior)
+	// For other operators, skip when target not found (e.g., certificate rules when processing CRLs)
+	if !found && r.Operator != "present" && r.Operator != "absent" {
+		return Result{
+			RuleID:    r.ID,
+			Reference: r.Reference,
+			Verdict:   VerdictSkip,
+			Severity:  r.Severity,
+			Message:   "target not found: " + r.Target,
+		}
+	}
+
+	// Pass nil node if target not found (for present/absent operators)
+	var targetNode *node.Node
+	if found {
+		targetNode = n
+	}
 
 	op, err := reg.Get(r.Operator)
 	if err != nil {
@@ -71,7 +91,7 @@ func Evaluate(
 		}
 	}
 
-	ok, err := op.Evaluate(n, ctx, r.Operands)
+	ok, err := op.Evaluate(targetNode, ctx, r.Operands)
 	if err != nil {
 		return Result{
 			RuleID:    r.ID,
