@@ -2,6 +2,7 @@ package operator
 
 import (
 	"github.com/cavoq/PCL/internal/node"
+	"github.com/zmap/zcrypto/x509"
 )
 
 type CRLValid struct{}
@@ -62,13 +63,16 @@ func (CRLSignedBy) Evaluate(_ *node.Node, ctx *EvaluationContext, _ []any) (bool
 		return false, nil
 	}
 
+	// Track if we found any applicable CRL (CRL whose issuer is in chain)
+	var foundApplicableCRL bool
 	for _, crlInfo := range ctx.CRLs {
 		if crlInfo.CRL == nil {
 			continue
 		}
 		crl := crlInfo.CRL
 
-		verified := false
+		// Find issuer in chain
+		var crlIssuerInChain *x509.Certificate
 		for _, certInfo := range ctx.Chain {
 			if certInfo.Cert == nil {
 				continue
@@ -78,18 +82,28 @@ func (CRLSignedBy) Evaluate(_ *node.Node, ctx *EvaluationContext, _ []any) (bool
 				continue
 			}
 
-			err := crl.CheckSignatureFrom(certInfo.Cert)
-			if err == nil {
-				verified = true
-				break
-			}
+			crlIssuerInChain = certInfo.Cert
+			break
 		}
 
-		if !verified {
+		// If CRL issuer not in chain, skip this CRL (can't verify)
+		if crlIssuerInChain == nil {
+			continue
+		}
+
+		foundApplicableCRL = true
+
+		// Verify signature
+		err := crl.CheckSignatureFrom(crlIssuerInChain)
+		if err != nil {
 			return false, nil
 		}
 	}
 
+	// If we found and verified at least one applicable CRL, return true
+	// If no CRLs were applicable (all skipped - issuers not in chain), return true (not applicable)
+	// The cert-not-revoked rule handles checking revocation status
+	_ = foundApplicableCRL // track for future use
 	return true, nil
 }
 
