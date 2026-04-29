@@ -35,6 +35,7 @@ func Run(cfg Config, w io.Writer) error {
 
 	reg := operator.DefaultRegistry()
 	var results []policy.Result
+	var cleanup func()
 
 	// Load CRLs if provided
 	var crls []*crl.Info
@@ -58,29 +59,35 @@ func Run(cfg Config, w io.Writer) error {
 	hasCert := cfg.CertPath != "" || len(cfg.CertURLs) > 0
 	hasIssuer := len(cfg.IssuerPaths) > 0 || len(cfg.IssuerURLs) > 0
 
-	if hasCert || hasIssuer {
+	// Build issuer list for CRL/OCSP signature verification (always needed if provided)
+	var issuers []*cert.Info
+	if hasIssuer {
+		var issuerCleanup func()
+		issuers, issuerCleanup, err = loadIssuers(cfg, nil)
+		if err != nil {
+			return err
+		}
+		if issuerCleanup != nil {
+			cleanup = issuerCleanup
+		}
+	}
+
+	// Schedule cleanup at the end of processing (for downloaded certs/issuers)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	if hasCert {
 		// Load leaf certificates
 		var certs []*cert.Info
-		var cleanup func()
+		var certCleanup func()
 
-		if hasCert {
-			certs, cleanup, err = loadCertificates(cfg)
-			if err != nil {
-				return err
-			}
+		certs, certCleanup, err = loadCertificates(cfg)
+		if err != nil {
+			return err
 		}
-
-		// Load issuer certificates
-		var issuers []*cert.Info
-		if hasIssuer {
-			issuers, cleanup, err = loadIssuers(cfg, cleanup)
-			if err != nil {
-				return err
-			}
-		}
-
-		if cleanup != nil {
-			defer cleanup()
+		if certCleanup != nil {
+			cleanup = certCleanup
 		}
 
 		// Build chain: leaf + issuers
@@ -203,6 +210,7 @@ func Run(cfg Config, w io.Writer) error {
 		}
 	} else if len(crls) > 0 {
 		// Process CRLs independently when no certificates provided
+		// Use issuers as chain for CRL signature verification
 		for _, crlInfo := range crls {
 			if crlInfo.CRL == nil {
 				continue
@@ -217,7 +225,7 @@ func Run(cfg Config, w io.Writer) error {
 			tree := crlNode
 
 			ctxOpts := []operator.ContextOption{operator.WithCRLs(crls)}
-			ctx := operator.NewEvaluationContext(tree, nil, nil, ctxOpts...)
+			ctx := operator.NewEvaluationContext(tree, nil, issuers, ctxOpts...)
 
 			// Filter policies by CRL type
 			hasDelta := hasDeltaCRLIndicator(crlInfo.CRL)

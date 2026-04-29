@@ -93,26 +93,26 @@ func inferInputTypeFromRules(rules []rule.Rule) string {
 
 	// Check first rule target
 	target := rules[0].Target
-	if strings.HasPrefix(target, "certificate.") {
+	if strings.HasPrefix(target, "certificate.") || target == "certificate" {
 		return AppliesToCert
 	}
-	if strings.HasPrefix(target, "crl.") {
+	if strings.HasPrefix(target, "crl.") || target == "crl" {
 		return AppliesToCRL
 	}
-	if strings.HasPrefix(target, "ocsp.") {
+	if strings.HasPrefix(target, "ocsp.") || target == "ocsp" {
 		return AppliesToOCSP
 	}
 
 	// Check "when" condition target if main target doesn't indicate type
 	if rules[0].When != nil && rules[0].When.Target != "" {
 		whenTarget := rules[0].When.Target
-		if strings.HasPrefix(whenTarget, "certificate.") {
+		if strings.HasPrefix(whenTarget, "certificate.") || whenTarget == "certificate" {
 			return AppliesToCert
 		}
-		if strings.HasPrefix(whenTarget, "crl.") {
+		if strings.HasPrefix(whenTarget, "crl.") || whenTarget == "crl" {
 			return AppliesToCRL
 		}
-		if strings.HasPrefix(whenTarget, "ocsp.") {
+		if strings.HasPrefix(whenTarget, "ocsp.") || whenTarget == "ocsp" {
 			return AppliesToOCSP
 		}
 	}
@@ -166,7 +166,7 @@ func policyAppliesToCert(p policy.Policy, cert *x509.Certificate) bool {
 // policyAppliesToCRL checks if a policy applies to a specific CRL
 func policyAppliesToCRL(p policy.Policy, hasDeltaIndicator bool, isIndirectCRL bool) bool {
 	// Check input type first
-	if !policyAppliesToInput(p, AppliesToCRL) {
+	if !policyAppliesToCRLInput(p) {
 		return false
 	}
 
@@ -198,6 +198,26 @@ func policyAppliesToCRL(p policy.Policy, hasDeltaIndicator bool, isIndirectCRL b
 				return true
 			}
 			continue
+		}
+	}
+
+	return false
+}
+
+// policyAppliesToCRLInput checks if a policy contains any CRL-related rules
+func policyAppliesToCRLInput(p policy.Policy) bool {
+	// If AppliesTo is explicitly set, use it
+	if len(p.AppliesTo) > 0 {
+		return slices.Contains(p.AppliesTo, AppliesToCRL)
+	}
+
+	// Check if any rule targets CRL
+	for _, r := range p.Rules {
+		if strings.HasPrefix(r.Target, "crl.") || r.Target == "crl" {
+			return true
+		}
+		if r.When != nil && (strings.HasPrefix(r.When.Target, "crl.") || r.When.Target == "crl") {
+			return true
 		}
 	}
 
