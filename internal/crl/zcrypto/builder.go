@@ -61,7 +61,10 @@ func buildSignatureAlgorithm(crl *x509.RevocationList) *node.Node {
 	n := node.New("signatureAlgorithm", nil)
 	n.Children["algorithm"] = node.New("algorithm", crl.SignatureAlgorithm.String())
 	n.Children["oid"] = node.New("oid", params.OID)
-	n.Children["parameters"] = buildAlgorithmIDParams(params)
+	paramNode := buildAlgorithmIDParams(params)
+	if paramNode != nil {
+		n.Children["parameters"] = paramNode
+	}
 	return n
 }
 
@@ -70,14 +73,24 @@ func buildTBSSignatureAlgorithm(crl *x509.RevocationList) *node.Node {
 	n := node.New("tbsSignatureAlgorithm", nil)
 	n.Children["algorithm"] = node.New("algorithm", crl.SignatureAlgorithm.String())
 	n.Children["oid"] = node.New("oid", params.OID)
-	n.Children["parameters"] = buildAlgorithmIDParams(params)
+	paramNode := buildAlgorithmIDParams(params)
+	if paramNode != nil {
+		n.Children["parameters"] = paramNode
+	}
 	return n
 }
 
 func buildAlgorithmIDParams(params asn1.ParamsState) *node.Node {
+	// If parameters are absent, do NOT create a node.
+	// This allows the `absent` operator to work correctly.
+	if params.IsAbsent {
+		return nil
+	}
+
+	// If parameters are NULL, create node with null=true.
+	// This allows the `isNull` operator to work correctly.
 	n := node.New("parameters", nil)
 	n.Children["null"] = node.New("null", params.IsNull)
-	n.Children["absent"] = node.New("absent", params.IsAbsent)
 
 	if params.PSS != nil {
 		n.Children["pss"] = buildPSSParams(params.PSS)
@@ -121,8 +134,9 @@ func buildOAEPParams(oaep *asn1.OAEPParams) *node.Node {
 func buildNestedAlgorithmID(algo asn1.AlgorithmIdentifier) *node.Node {
 	n := node.New("algorithm", nil)
 	n.Children["oid"] = node.New("oid", algo.OID)
-	if algo.Params.OID != "" {
-		n.Children["parameters"] = buildAlgorithmIDParams(algo.Params)
+	paramNode := buildAlgorithmIDParams(algo.Params)
+	if paramNode != nil {
+		n.Children["parameters"] = paramNode
 	}
 	return n
 }

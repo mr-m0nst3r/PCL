@@ -72,12 +72,13 @@ func Evaluate(
 
 	n, found := root.Resolve(r.Target)
 
-	// For presence/absence operators, continue evaluation even if target not found
+	// For presence/absence/null operators, continue evaluation even if target not found
 	// present: returns false when target not found (expected behavior)
 	// absent: returns true when target not found (expected behavior)
+	// isNull: returns false when target not found (absent is not NULL)
 	// For eq/neq operators on keyUsage boolean fields, treat missing as implicit false
 	// For other operators, skip when target not found (e.g., certificate rules when processing CRLs)
-	if !found && r.Operator != "present" && r.Operator != "absent" {
+	if !found && r.Operator != "present" && r.Operator != "absent" && r.Operator != "isNull" {
 		// Special handling for eq/neq on keyUsage boolean fields
 		if (r.Operator == "eq" || r.Operator == "neq") && isKeyUsageBooleanField(r.Target) {
 			// Missing keyUsage bit = implicit false
