@@ -7,9 +7,10 @@ import (
 
 // ParamsState represents the state of an AlgorithmIdentifier parameters field.
 type ParamsState struct {
-	IsNull   bool   // parameters is ASN.1 NULL
-	IsAbsent bool   // parameters field is absent
-	OID      string // algorithm OID
+	IsNull     bool   // parameters is ASN.1 NULL
+	IsAbsent   bool   // parameters field is absent
+	OID        string // algorithm OID
+	NamedCurve string // namedCurve OID for ECDSA (from parameters field)
 
 	// RSASSA-PSS parameters (OID 1.2.840.113549.1.1.10)
 	PSS *PSSParams
@@ -79,6 +80,16 @@ func ParseAlgorithmIDParams(derBytes []byte) ParamsState {
 
 	if paramsTag == cryptobyte_asn1.NULL {
 		result.IsNull = true
+		return result
+	}
+
+	// For ECDSA (id-ecPublicKey), parameters is a namedCurve OID
+	// ECDSA OIDs: 1.2.840.10045.2.1 (id-ecPublicKey), 1.3.132.1.12 (id-ecDH), 1.3.132.1.13 (id-ecMQV)
+	if paramsTag == cryptobyte_asn1.OBJECT_IDENTIFIER {
+		var namedCurve cryptobyte.String
+		if params.ReadASN1(&namedCurve, cryptobyte_asn1.OBJECT_IDENTIFIER) {
+			result.NamedCurve = oidString(namedCurve)
+		}
 		return result
 	}
 

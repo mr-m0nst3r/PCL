@@ -4,6 +4,7 @@ import (
 	certstd "crypto/x509"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/cavoq/PCL/internal/aia"
@@ -23,12 +24,23 @@ import (
 
 func Run(cfg Config, w io.Writer) error {
 	applyDefaults(&cfg)
-	policies, err := policy.ParseDir(cfg.PolicyPath)
+
+	// Check if path is a directory first
+	isDir, err := isDirectory(cfg.PolicyPath)
 	if err != nil {
-		policies = nil
+		return fmt.Errorf("checking policy path: %w", err)
+	}
+
+	var policies []policy.Policy
+	if isDir {
+		policies, err = policy.ParseDir(cfg.PolicyPath)
+		if err != nil {
+			return fmt.Errorf("failed to parse policy directory: %w", err)
+		}
+	} else {
 		p, err := policy.ParseFile(cfg.PolicyPath)
 		if err != nil {
-			return fmt.Errorf("failed to parse policies: %w", err)
+			return fmt.Errorf("failed to parse policy file: %w", err)
 		}
 		policies = append(policies, p)
 	}
@@ -559,4 +571,13 @@ func addFetchedInfoToNode(tree *node.Node, caIssuerFormat aia.Format, crlFormat 
 	if crlFormat != "" {
 		tree.Children["crlFormat"] = node.New("crlFormat", string(crlFormat))
 	}
+}
+
+// isDirectory checks if the given path is a directory.
+func isDirectory(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
 }

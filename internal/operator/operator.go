@@ -59,5 +59,4 @@ var All = []Operator{
 	NameConstraintsValid{},
 	CertificatePolicyValid{},
 	IsNull{},
-	IsAbsent{},
 }

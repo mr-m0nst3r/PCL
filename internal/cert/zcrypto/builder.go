@@ -130,7 +130,10 @@ func buildSignatureAlgorithm(cert *x509.Certificate) *node.Node {
 	if len(cert.SignatureAlgorithmOID) > 0 {
 		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
 	}
-	n.Children["parameters"] = buildAlgorithmIDParams(ParseCertSignatureAlgorithmParams(cert.Raw))
+	params := buildAlgorithmIDParams(ParseCertSignatureAlgorithmParams(cert.Raw))
+	if params != nil {
+		n.Children["parameters"] = params
+	}
 	return n
 }
 
@@ -140,14 +143,29 @@ func buildTBSSignatureAlgorithm(cert *x509.Certificate) *node.Node {
 	if len(cert.SignatureAlgorithmOID) > 0 {
 		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
 	}
-	n.Children["parameters"] = buildAlgorithmIDParams(ParseTBSCertSignatureParams(cert.RawTBSCertificate))
+	params := buildAlgorithmIDParams(ParseTBSCertSignatureParams(cert.RawTBSCertificate))
+	if params != nil {
+		n.Children["parameters"] = params
+	}
 	return n
 }
 
 func buildAlgorithmIDParams(params asn1.ParamsState) *node.Node {
+	// If parameters are absent, do NOT create a node.
+	// This allows the `absent` operator to work correctly.
+	if params.IsAbsent {
+		return nil
+	}
+
+	// If parameters are NULL, create node with null=true.
+	// This allows the `isNull` operator to work correctly.
 	n := node.New("parameters", nil)
 	n.Children["null"] = node.New("null", params.IsNull)
-	n.Children["absent"] = node.New("absent", params.IsAbsent)
+
+	// For ECDSA, the NamedCurve is the curve OID (e.g., secp256r1, secp384r1)
+	if params.NamedCurve != "" {
+		n.Children["namedCurve"] = node.New("namedCurve", params.NamedCurve)
+	}
 
 	if params.PSS != nil {
 		n.Children["pss"] = buildPSSParams(params.PSS)
@@ -191,8 +209,9 @@ func buildOAEPParams(oaep *asn1.OAEPParams) *node.Node {
 func buildNestedAlgorithmID(algo asn1.AlgorithmIdentifier) *node.Node {
 	n := node.New("algorithm", nil)
 	n.Children["oid"] = node.New("oid", algo.OID)
-	if algo.Params.OID != "" {
-		n.Children["parameters"] = buildAlgorithmIDParams(algo.Params)
+	params := buildAlgorithmIDParams(algo.Params)
+	if params != nil {
+		n.Children["parameters"] = params
 	}
 	return n
 }
@@ -212,7 +231,10 @@ func buildSubjectPublicKeyInfo(cert *x509.Certificate) *node.Node {
 	if len(cert.PublicKeyAlgorithmOID) > 0 {
 		algo.Children["oid"] = node.New("oid", cert.PublicKeyAlgorithmOID.String())
 	}
-	algo.Children["parameters"] = buildAlgorithmIDParams(ParseSubjectPublicKeyInfoParams(cert.RawSubjectPublicKeyInfo))
+	params := buildAlgorithmIDParams(ParseSubjectPublicKeyInfoParams(cert.RawSubjectPublicKeyInfo))
+	if params != nil {
+		algo.Children["parameters"] = params
+	}
 	n.Children["algorithm"] = algo
 
 	if cert.PublicKey != nil {
