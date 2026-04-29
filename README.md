@@ -32,10 +32,36 @@ This mode:
 
 Options for granular control:
 ```bash
+# Limit chain depth
 pcl --policy <path> --cert leaf.pem --auto-validate --max-chain-depth 5
+
+# Disable specific auto-fetch features
+pcl --policy <path> --cert leaf.pem --auto-validate --no-auto-chain
 pcl --policy <path> --cert leaf.pem --auto-validate --no-auto-crl
 pcl --policy <path> --cert leaf.pem --auto-validate --no-auto-ocsp
+
+# OCSP nonce configuration (RFC 9654)
+pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-nonce-length 32
+pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-nonce-value aabbcc...
+pcl --policy <path> --cert leaf.pem --auto-validate --no-ocsp-nonce
+
+# OCSP CertID hash algorithm (RFC 5019 vs modern)
+pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-hash sha1   # RFC 5019
+pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-hash sha256 # Modern (default)
 ```
+
+### Debug OCSP Requests
+
+Use `-vv` to see detailed OCSP request/response information:
+```bash
+pcl --policy policies/RFC9654.yaml --cert leaf.pem --auto-validate -vv
+```
+
+Output includes:
+- Request nonce length and hex value
+- CertID hash algorithm (SHA1/SHA256)
+- Response nonce and match status
+- OCSP response timing details
 
 ### Fetch TLS Certificates from URLs
 
@@ -169,7 +195,15 @@ rules:
 
 - [RFC 5280](https://datatracker.ietf.org/doc/html/rfc5280) - Internet X.509 Public Key Infrastructure Certificate and CRL Profile
 - [RFC 4055](https://datatracker.ietf.org/doc/html/rfc4055) - Additional Algorithms and Identifiers for RSA Cryptography
+- [RFC 5480](https://datatracker.ietf.org/doc/html/rfc5480) - Elliptic Curve Cryptography SubjectPublicKeyInfo Format
+- [RFC 5758](https://datatracker.ietf.org/doc/html/rfc5758) - DSA and ECDSA with SHA2
+- [RFC 5759](https://datatracker.ietf.org/doc/html/rfc5759) - Suite B Certificate and CRL Profile
 - [RFC 6960](https://datatracker.ietf.org/doc/html/rfc6960) - Online Certificate Status Protocol (OCSP)
+- [RFC 8813](https://datatracker.ietf.org/doc/html/rfc8813) - Updates to RFC 5480
+- [RFC 5019](https://datatracker.ietf.org/doc/html/rfc5019) - Lightweight OCSP Profile for High-Volume Environments
+- [RFC 9608](https://datatracker.ietf.org/doc/html/rfc9608) - No Revocation Available for X.509 Certificates
+- [RFC 9654](https://datatracker.ietf.org/doc/html/rfc9654) - OCSP Nonce Extension
+- CA/Browser Forum Baseline Requirements
 
 
 ## ➕ Supported Operators
@@ -425,7 +459,13 @@ ocsp
 ├── thisUpdate             # time.Time
 ├── nextUpdate             # time.Time
 ├── revocationReason       # Integer (if revoked)
-└── signatureAlgorithm     # Same as certificate
+├── signatureAlgorithm     # Same as certificate
+├── nonce                  # RFC 9654 nonce extension
+│   ├── present            # Boolean
+│   ├── value              # []byte (raw nonce)
+│   ├── length             # Integer (bytes)
+│   └── hexValue           # String (hex representation)
+└── responderID            # Responder identification
 ```
 
 ## 🔧 Development
