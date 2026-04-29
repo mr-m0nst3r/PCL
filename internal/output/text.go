@@ -121,9 +121,9 @@ func verdictLabelColoredPaddedWithSeverity(verdict string, severity string, widt
 	case rule.VerdictPass:
 		return colorize(padded, ansiGreen)
 	case rule.VerdictFail:
-		// INFO level failures use blue (informational), not red (error)
+		// INFO level failures use white (informational), more visible than blue
 		if severity == "info" {
-			return colorize(padded, ansiBlue)
+			return colorize(padded, ansiWhite)
 		}
 		if severity == "warning" {
 			return colorize(padded, ansiYellow)
@@ -147,6 +147,7 @@ const (
 	ansiYellow = "\033[33m"
 	ansiBlue   = "\033[34m"
 	ansiCyan   = "\033[36m"
+	ansiWhite  = "\033[37m"
 )
 
 func writeRulesTable(w io.Writer, results []rule.Result, passCount, failCount, skipCount int) error {
