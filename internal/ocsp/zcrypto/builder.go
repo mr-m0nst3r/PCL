@@ -69,6 +69,20 @@ func buildOCSP(resp *ocsp.Response) *node.Node {
 		root.Children["extensions"] = buildExtensions(resp.Extensions)
 	}
 
+	// Nonce extension (RFC 9654)
+	// Parse nonce from responseExtensions (inside TBSResponseData), NOT from singleExtensions.
+	// The nonce is in responseExtensions, which are NOT exposed by golang.org/x/crypto/ocsp.
+	// We parse it directly from the raw OCSP response.
+	nonce := ParseNonceFromRaw(resp.Raw)
+	nonceNode := node.New("nonce", nil)
+	nonceNode.Children["present"] = node.New("present", nonce.Present)
+	if nonce.Present {
+		nonceNode.Children["value"] = node.New("value", nonce.Value)
+		nonceNode.Children["length"] = node.New("length", nonce.Length)
+		nonceNode.Children["hexValue"] = node.New("hexValue", nonce.HexValue)
+	}
+	root.Children["nonce"] = nonceNode
+
 	return root
 }
 
@@ -90,14 +104,24 @@ func buildSignatureAlgorithm(algo x509.SignatureAlgorithm, params asn1.ParamsSta
 	n := node.New("signatureAlgorithm", nil)
 	n.Children["algorithm"] = node.New("algorithm", algo.String())
 	n.Children["oid"] = node.New("oid", params.OID)
-	n.Children["parameters"] = buildAlgorithmIDParams(params)
+	paramNode := buildAlgorithmIDParams(params)
+	if paramNode != nil {
+		n.Children["parameters"] = paramNode
+	}
 	return n
 }
 
 func buildAlgorithmIDParams(params asn1.ParamsState) *node.Node {
+	// If parameters are absent, do NOT create a node.
+	// This allows the `absent` operator to work correctly.
+	if params.IsAbsent {
+		return nil
+	}
+
+	// If parameters are NULL, create node with null=true.
+	// This allows the `isNull` operator to work correctly.
 	n := node.New("parameters", nil)
 	n.Children["null"] = node.New("null", params.IsNull)
-	n.Children["absent"] = node.New("absent", params.IsAbsent)
 
 	if params.PSS != nil {
 		n.Children["pss"] = buildPSSParams(params.PSS)
@@ -124,8 +148,9 @@ func buildPSSParams(pss *asn1.PSSParams) *node.Node {
 func buildNestedAlgorithmID(algo asn1.AlgorithmIdentifier) *node.Node {
 	n := node.New("algorithm", nil)
 	n.Children["oid"] = node.New("oid", algo.OID)
-	if algo.Params.OID != "" {
-		n.Children["parameters"] = buildAlgorithmIDParams(algo.Params)
+	paramNode := buildAlgorithmIDParams(algo.Params)
+	if paramNode != nil {
+		n.Children["parameters"] = paramNode
 	}
 	return n
 }

@@ -16,6 +16,13 @@ type Info struct {
 	Response *ocsp.Response
 	FilePath string
 	Hash     string
+
+	// Request debug info (populated when auto-fetching)
+	RequestNonce       []byte // Nonce sent in request
+	RequestNonceHex    string // Hex representation of nonce
+	RequestNonceLen    int    // Length of nonce in request
+	RequestRawLen      int    // Length of raw OCSP request bytes
+	RequestHashAlgorithm string // Hash algorithm used for CertID (e.g., "SHA256")
 }
 
 func ParseOCSP(data []byte) (*ocsp.Response, error) {

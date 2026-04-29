@@ -168,7 +168,8 @@ func writeRulesTable(w io.Writer, results []rule.Result, passCount, failCount, s
 		if rr.Reference != "" {
 			showReference = true
 		}
-		if rr.Severity == "warning" || rr.Severity == "info" {
+		// Show severity column if any rule has a severity defined (not empty)
+		if rr.Severity != "" {
 			showSeverity = true
 		}
 	}

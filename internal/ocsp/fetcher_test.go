@@ -1,6 +1,7 @@
 package ocsp
 
 import (
+	"bytes"
 	"crypto/x509"
 	"testing"
 )
@@ -54,21 +55,21 @@ func TestGetOCSPURLFromCert_MultipleOCSPServers(t *testing.T) {
 }
 
 func TestFetchOCSP_NilCert(t *testing.T) {
-	_, err := FetchOCSP(nil, &x509.Certificate{}, "http://example.com", 5)
+	_, err := FetchOCSP(nil, &x509.Certificate{}, "http://example.com", 5, nil)
 	if err == nil {
 		t.Error("Expected error for nil cert")
 	}
 }
 
 func TestFetchOCSP_NilIssuer(t *testing.T) {
-	_, err := FetchOCSP(&x509.Certificate{}, nil, "http://example.com", 5)
+	_, err := FetchOCSP(&x509.Certificate{}, nil, "http://example.com", 5, nil)
 	if err == nil {
 		t.Error("Expected error for nil issuer")
 	}
 }
 
 func TestFetchOCSP_EmptyURL(t *testing.T) {
-	_, err := FetchOCSP(&x509.Certificate{}, &x509.Certificate{}, "", 5)
+	_, err := FetchOCSP(&x509.Certificate{}, &x509.Certificate{}, "", 5, nil)
 	if err == nil {
 		t.Error("Expected error for empty URL")
 	}
@@ -76,7 +77,7 @@ func TestFetchOCSP_EmptyURL(t *testing.T) {
 
 func TestFetchOCSPFromChain_TooShort(t *testing.T) {
 	chain := []*x509.Certificate{&x509.Certificate{}}
-	_, _, err := FetchOCSPFromChain(chain, 5)
+	_, _, err := FetchOCSPFromChain(chain, 5, nil)
 	if err == nil {
 		t.Error("Expected error for chain with less than 2 certificates")
 	}
@@ -84,7 +85,7 @@ func TestFetchOCSPFromChain_TooShort(t *testing.T) {
 
 func TestFetchOCSPFromChain_EmptyChain(t *testing.T) {
 	chain := []*x509.Certificate{}
-	_, _, err := FetchOCSPFromChain(chain, 5)
+	_, _, err := FetchOCSPFromChain(chain, 5, nil)
 	if err == nil {
 		t.Error("Expected error for empty chain")
 	}
@@ -95,7 +96,7 @@ func TestFetchOCSPFromChain_NoOCSPURL(t *testing.T) {
 		&x509.Certificate{OCSPServer: nil},
 		&x509.Certificate{},
 	}
-	resp, url, err := FetchOCSPFromChain(chain, 5)
+	resp, url, err := FetchOCSPFromChain(chain, 5, nil)
 	if err != nil {
 		t.Errorf("Expected no error for cert without OCSP URL, got %v", err)
 	}
@@ -104,5 +105,62 @@ func TestFetchOCSPFromChain_NoOCSPURL(t *testing.T) {
 	}
 	if url != "" {
 		t.Errorf("Expected empty URL for cert without OCSP URL, got %s", url)
+	}
+}
+
+func TestNonceOptions_GenerateNonce(t *testing.T) {
+	nonce, err := generateNonce(32)
+	if err != nil {
+		t.Errorf("Failed to generate nonce: %v", err)
+	}
+	if len(nonce) != 32 {
+		t.Errorf("Expected nonce length 32, got %d", len(nonce))
+	}
+}
+
+func TestNonceOptions_ParseNonceHex(t *testing.T) {
+	hexValue := "aabbccdd12345678"
+	nonce, err := parseNonceHex(hexValue)
+	if err != nil {
+		t.Errorf("Failed to parse nonce hex: %v", err)
+	}
+	expected := []byte{0xaa, 0xbb, 0xcc, 0xdd, 0x12, 0x34, 0x56, 0x78}
+	if !bytes.Equal(nonce, expected) {
+		t.Errorf("Expected %v, got %v", expected, nonce)
+	}
+}
+
+func TestAddNonceExtension(t *testing.T) {
+	// Create a minimal OCSPRequest for testing
+	// OCSPRequest ::= SEQUENCE { TBSRequest }
+	// TBSRequest ::= SEQUENCE { requestList }
+	// requestList ::= SEQUENCE OF Request
+
+	// Minimal TBSRequest content (just requestList)
+	requestList := encodeSequence(encodeSequence([]byte{}))
+	tbsRequest := encodeSequence(requestList)
+	ocspRequest := encodeSequence(tbsRequest)
+
+	nonce := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+
+	result, err := addNonceToOCSPRequest(ocspRequest, nonce)
+	if err != nil {
+		t.Errorf("Failed to add nonce extension: %v", err)
+	}
+
+	// Verify the result is valid DER
+	if len(result) < len(ocspRequest)+10 {
+		t.Errorf("Result too short, nonce extension may not be added properly")
+	}
+
+	// Check that result starts with SEQUENCE tag (0x30)
+	if result[0] != 0x30 {
+		t.Errorf("Expected SEQUENCE tag (0x30), got 0x%02x", result[0])
+	}
+
+	// Verify it can be parsed back
+	_, contentStart := parseDERLength(result, 1)
+	if contentStart >= len(result) {
+		t.Errorf("Invalid result structure")
 	}
 }

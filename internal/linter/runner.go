@@ -110,7 +110,7 @@ func Run(cfg Config, w io.Writer) error {
 
 		// Auto-validate: climb chain via CA Issuers URLs BEFORE BuildChain
 		// This fetches missing intermediates to complete the chain
-		if cfg.AutoValidate && cfg.AutoValidateChain {
+		if cfg.AutoValidate && !cfg.NoAutoChain {
 			// Start from leaf certificates and climb toward root
 			// We need to climb from each leaf to find intermediates
 			var climbedCerts []*cert.Info
@@ -133,14 +133,17 @@ func Run(cfg Config, w io.Writer) error {
 			return fmt.Errorf("failed to build chain: %w", err)
 		}
 
+		// Build nonce options from config
+		nonceOpts := buildNonceOptions(cfg)
+
 		// Auto-validate: fetch CRLs from CRL Distribution Points
-		if cfg.AutoValidate && cfg.AutoValidateCRL {
+		if cfg.AutoValidate && !cfg.NoAutoCRL {
 			autoCRLs := fetchAutoCRL(chain, cfg.OCSPTimeout, w)
 			crls = append(crls, autoCRLs...)
 		}
 
 		// Auto-validate: fetch OCSP for all certificates in chain
-		if cfg.AutoValidate && cfg.AutoValidateOCSP {
+		if cfg.AutoValidate && !cfg.NoAutoOCSP {
 			for i := 0; i < len(chain)-1; i++ {
 				c := chain[i]
 				if c.Cert == nil || len(c.Cert.OCSPServer) == 0 {
@@ -148,24 +151,21 @@ func Run(cfg Config, w io.Writer) error {
 				}
 				// Build mini chain for OCSP request: [cert, issuer]
 				miniChain := []*cert.Info{c, chain[i+1]}
-				autoOCSPs, err := fetchAutoOCSP(miniChain, cfg.OCSPTimeout)
+				autoOCSPs, err := fetchAutoOCSP(miniChain, cfg.OCSPTimeout, nonceOpts)
 				if err != nil {
 					fmt.Fprintf(w, "Warning: auto OCSP fetch failed for cert %d: %v\n", i, err)
 					continue
+				}
+				// Debug: print OCSP response details when verbosity >= 2
+				if cfg.Verbosity >= 2 && len(autoOCSPs) > 0 {
+					for _, ocspInfo := range autoOCSPs {
+						printOCSPResponseDebug(w, ocspInfo, nonceOpts)
+					}
 				}
 				ocsps = append(ocsps, autoOCSPs...)
 			}
 		}
 
-		// Auto-fetch OCSP if enabled and chain has issuer (legacy mode)
-		if cfg.AutoOCSP && len(chain) >= 2 {
-			autoOCSPs, err := fetchAutoOCSP(chain, cfg.OCSPTimeout)
-			if err != nil {
-				// Log warning but continue - OCSP fetch failure shouldn't stop cert validation
-				fmt.Fprintf(w, "Warning: auto OCSP fetch failed: %v\n", err)
-			}
-			ocsps = append(ocsps, autoOCSPs...)
-		}
 
 		for _, c := range chain {
 			tree := certzcrypto.BuildTree(c.Cert)
@@ -382,7 +382,7 @@ func applyDefaults(cfg *Config) {
 
 // fetchAutoOCSP automatically fetches OCSP responses for certificates in the chain.
 // For leaf certificates, uses the OCSP URL from AIA extension and issuer from chain.
-func fetchAutoOCSP(chain []*cert.Info, timeout time.Duration) ([]*ocsp.Info, error) {
+func fetchAutoOCSP(chain []*cert.Info, timeout time.Duration, nonceOpts *ocsp.NonceOptions) ([]*ocsp.Info, error) {
 	if len(chain) < 2 {
 		return nil, fmt.Errorf("chain must have at least 2 certificates for OCSP request")
 	}
@@ -407,19 +407,30 @@ func fetchAutoOCSP(chain []*cert.Info, timeout time.Duration) ([]*ocsp.Info, err
 	}
 
 	// Fetch OCSP for leaf certificate
-	resp, url, err := ocsp.FetchOCSPFromChain(stdChain, timeout)
+	fetchResult, url, err := ocsp.FetchOCSPFromChainWithInfo(stdChain, timeout, nonceOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OCSP from %s: %w", url, err)
 	}
-	if resp == nil {
+	if fetchResult == nil {
 		// No OCSP URL in certificate, not an error
 		return nil, nil
 	}
 
-	results = append(results, &ocsp.Info{
-		Response: resp,
+	info := &ocsp.Info{
+		Response: fetchResult.Response,
 		FilePath: url, // Use URL as "file path" for auto-fetched responses
-	})
+	}
+
+	// Populate request debug info
+	if fetchResult.RequestInfo != nil {
+		info.RequestNonce = fetchResult.RequestInfo.Nonce
+		info.RequestNonceHex = fetchResult.RequestInfo.NonceHex
+		info.RequestNonceLen = fetchResult.RequestInfo.NonceLen
+		info.RequestRawLen = fetchResult.RequestInfo.RequestLen
+		info.RequestHashAlgorithm = fetchResult.RequestInfo.HashAlgorithm
+	}
+
+	results = append(results, info)
 
 	return results, nil
 }
@@ -580,4 +591,100 @@ func isDirectory(path string) (bool, error) {
 		return false, err
 	}
 	return info.IsDir(), nil
+}
+
+// buildNonceOptions creates nonce options from config for OCSP requests (RFC 9654).
+func buildNonceOptions(cfg Config) *ocsp.NonceOptions {
+	return &ocsp.NonceOptions{
+		Length:   cfg.OCSPNonceLength,
+		Value:    cfg.OCSPNonceValue,
+		Disabled: cfg.NoOCSPNonce,
+		Hash:     cfg.OCSPHashAlgorithm,
+	}
+}
+
+// printOCSPResponseDebug prints OCSP response details for debugging.
+func printOCSPResponseDebug(w io.Writer, ocspInfo *ocsp.Info, nonceOpts *ocsp.NonceOptions) {
+	if ocspInfo == nil || ocspInfo.Response == nil {
+		return
+	}
+	resp := ocspInfo.Response
+
+	fmt.Fprintf(w, "\n[OCSP Debug]\n")
+	fmt.Fprintf(w, "  URL: %s\n", ocspInfo.FilePath)
+
+	// Print request info
+	fmt.Fprintf(w, "  Request:\n")
+	if ocspInfo.RequestRawLen > 0 {
+		fmt.Fprintf(w, "    Length: %d bytes\n", ocspInfo.RequestRawLen)
+	} else {
+		fmt.Fprintf(w, "    Length: (unknown)\n")
+	}
+
+	// Print hash algorithm used for CertID
+	if ocspInfo.RequestHashAlgorithm != "" {
+		fmt.Fprintf(w, "    CertID Hash Algorithm: %s\n", ocspInfo.RequestHashAlgorithm)
+	} else {
+		fmt.Fprintf(w, "    CertID Hash Algorithm: SHA256 (default)\n")
+	}
+
+	// Print nonce request info
+	if ocspInfo.RequestNonceLen > 0 {
+		fmt.Fprintf(w, "    Nonce Length: %d bytes\n", ocspInfo.RequestNonceLen)
+		fmt.Fprintf(w, "    Nonce (hex): %s\n", ocspInfo.RequestNonceHex)
+	} else if nonceOpts != nil && nonceOpts.Disabled {
+		fmt.Fprintf(w, "    Nonce: disabled\n")
+	} else {
+		fmt.Fprintf(w, "    Nonce: (not requested)\n")
+	}
+
+	// Print response info
+	var statusStr string
+	switch resp.Status {
+	case 0:
+		statusStr = "Good"
+	case 1:
+		statusStr = "Revoked"
+	case 2:
+		statusStr = "Unknown"
+	default:
+		statusStr = fmt.Sprintf("Unknown(%d)", resp.Status)
+	}
+	fmt.Fprintf(w, "  Response:\n")
+	fmt.Fprintf(w, "    Status: %s\n", statusStr)
+	fmt.Fprintf(w, "    ProducedAt: %s\n", resp.ProducedAt.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(w, "    ThisUpdate: %s\n", resp.ThisUpdate.Format("2006-01-02 15:04:05"))
+	if !resp.NextUpdate.IsZero() {
+		fmt.Fprintf(w, "    NextUpdate: %s\n", resp.NextUpdate.Format("2006-01-02 15:04:05"))
+	} else {
+		fmt.Fprintf(w, "    NextUpdate: (not set)\n")
+	}
+	if !resp.RevokedAt.IsZero() {
+		fmt.Fprintf(w, "    RevokedAt: %s\n", resp.RevokedAt.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(w, "    RevocationReason: %d\n", resp.RevocationReason)
+	}
+	fmt.Fprintf(w, "    SerialNumber: %s\n", resp.SerialNumber.String())
+	fmt.Fprintf(w, "    SignatureAlgorithm: %s\n", resp.SignatureAlgorithm.String())
+
+	// Parse nonce from raw response
+	nonceState := ocspzcrypto.ParseNonceFromRaw(resp.Raw)
+	fmt.Fprintf(w, "    Response Nonce:\n")
+	if nonceState.Present {
+		fmt.Fprintf(w, "      Present: true\n")
+		fmt.Fprintf(w, "      Length: %d bytes\n", nonceState.Length)
+		fmt.Fprintf(w, "      Value (hex): %s\n", nonceState.HexValue)
+		// Check if nonce matches request
+		if ocspInfo.RequestNonceLen > 0 && nonceState.Length == ocspInfo.RequestNonceLen {
+			if nonceState.HexValue == ocspInfo.RequestNonceHex {
+				fmt.Fprintf(w, "      Match: YES (echoed correctly)\n")
+			} else {
+				fmt.Fprintf(w, "      Match: NO (different value)\n")
+			}
+		} else if ocspInfo.RequestNonceLen > 0 && nonceState.Length != ocspInfo.RequestNonceLen {
+			fmt.Fprintf(w, "      Match: NO (different length: requested %d, got %d)\n", ocspInfo.RequestNonceLen, nonceState.Length)
+		}
+	} else {
+		fmt.Fprintf(w, "      Present: false\n")
+	}
+	fmt.Fprintf(w, "\n")
 }

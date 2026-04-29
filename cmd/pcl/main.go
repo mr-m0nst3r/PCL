@@ -23,9 +23,6 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 			if !hasCert && !hasIssuer && opts.CRLPath == "" && opts.OCSPPath == "" {
 				return fmt.Errorf("at least one of --cert, --cert-url, --issuer, --issuer-url, --crl, or --ocsp is required")
 			}
-			if opts.AutoOCSP && !hasIssuer {
-				return fmt.Errorf("--auto-ocsp requires --issuer or --issuer-url")
-			}
 			return linter.Run(*opts, cmd.OutOrStdout())
 		},
 	}
@@ -39,7 +36,6 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 	root.Flags().StringSliceVar(&opts.IssuerURLs, "issuer-url", nil, "Issuer certificate URL (repeatable)")
 	root.Flags().StringVar(&opts.CRLPath, "crl", "", "Path to CRL file or directory (PEM/DER)")
 	root.Flags().StringVar(&opts.OCSPPath, "ocsp", "", "Path to OCSP response file or directory (DER/PEM)")
-	root.Flags().BoolVar(&opts.AutoOCSP, "auto-ocsp", false, "Automatically fetch OCSP response from certificate's AIA extension (requires issuer)")
 	root.Flags().DurationVar(&opts.OCSPTimeout, "ocsp-url-timeout", 5*time.Second, "OCSP request timeout (e.g. 5s, 10s)")
 	root.Flags().StringVar(&opts.OutputFmt, "output", "text", "Output format: text, json, or yaml")
 	root.Flags().CountVarP(&opts.Verbosity, "verbose", "v", "Increase output detail: -v shows passed, -vv includes skipped")
@@ -47,10 +43,18 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 
 	// Auto-validate mode flags
 	root.Flags().BoolVar(&opts.AutoValidate, "auto-validate", false, "Enable automatic PKI resource fetching (OCSP, CRL, chain climbing)")
-	root.Flags().BoolVar(&opts.AutoValidateOCSP, "auto-ocsp-chain", true, "Fetch OCSP for all certificates in chain (only with --auto-validate)")
-	root.Flags().BoolVar(&opts.AutoValidateCRL, "auto-crl", true, "Fetch CRLs from CRL Distribution Points (only with --auto-validate)")
-	root.Flags().BoolVar(&opts.AutoValidateChain, "auto-chain", true, "Climb chain via CA Issuers URLs (only with --auto-validate)")
+	root.Flags().BoolVar(&opts.NoAutoChain, "no-auto-chain", false, "Disable chain climbing via CA Issuers URLs (only with --auto-validate)")
+	root.Flags().BoolVar(&opts.NoAutoCRL, "no-auto-crl", false, "Disable CRL fetching from CRL Distribution Points (only with --auto-validate)")
+	root.Flags().BoolVar(&opts.NoAutoOCSP, "no-auto-ocsp", false, "Disable OCSP fetching for all certificates in chain (only with --auto-validate)")
 	root.Flags().IntVar(&opts.MaxChainDepth, "max-chain-depth", 10, "Maximum chain depth for climbing (only with --auto-validate)")
+
+	// OCSP nonce options (RFC 9654)
+	root.Flags().IntVar(&opts.OCSPNonceLength, "ocsp-nonce-length", 32, "Nonce length in bytes for OCSP requests (default 32, per RFC 9654)")
+	root.Flags().StringVar(&opts.OCSPNonceValue, "ocsp-nonce-value", "", "Custom nonce value in hex format (e.g. 'aabbcc...')")
+	root.Flags().BoolVar(&opts.NoOCSPNonce, "no-ocsp-nonce", false, "Disable nonce in OCSP requests")
+
+	// OCSP request hash algorithm (RFC 5019 vs modern)
+	root.Flags().StringVar(&opts.OCSPHashAlgorithm, "ocsp-hash", "sha256", "Hash algorithm for OCSP CertID: 'sha1' (RFC 5019) or 'sha256' (default, modern)")
 
 	return root
 }
