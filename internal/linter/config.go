@@ -3,7 +3,7 @@ package linter
 import "time"
 
 type Config struct {
-	PolicyPath   string
+	PolicyPaths  []string // Multiple policy paths
 	CertPath     string
 	CertURLs     []string
 	CertTimeout  time.Duration

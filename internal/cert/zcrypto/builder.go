@@ -2,10 +2,14 @@ package zcrypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
+	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/zmap/zcrypto/x509"
+	"github.com/zmap/zcrypto/x509/ct"
 
 	"github.com/cavoq/PCL/internal/asn1"
 	"github.com/cavoq/PCL/internal/node"
@@ -218,8 +222,33 @@ func buildNestedAlgorithmID(algo asn1.AlgorithmIdentifier) *node.Node {
 
 func buildValidity(cert *x509.Certificate) *node.Node {
 	n := node.New("validity", nil)
-	n.Children["notBefore"] = node.New("notBefore", cert.NotBefore)
-	n.Children["notAfter"] = node.New("notAfter", cert.NotAfter)
+
+	notBeforeNode := node.New("notBefore", cert.NotBefore)
+	notAfterNode := node.New("notAfter", cert.NotAfter)
+
+	// Parse time encoding info from TBSCertificate
+	if len(cert.RawTBSCertificate) > 0 {
+		encodingInfo, err := ParseValidityEncoding(cert.RawTBSCertificate)
+		if err == nil && encodingInfo != nil {
+			if encodingInfo.NotBefore != nil {
+				notBeforeNode.Children["encoding"] = node.New("encoding", encodingInfo.NotBefore.Tag)
+				notBeforeNode.Children["format"] = node.New("format", encodingInfo.NotBefore.RawString)
+				notBeforeNode.Children["isUTC"] = node.New("isUTC", encodingInfo.NotBefore.IsUTC)
+				notBeforeNode.Children["hasSeconds"] = node.New("hasSeconds", encodingInfo.NotBefore.HasSeconds)
+				notBeforeNode.Children["hasZulu"] = node.New("hasZulu", encodingInfo.NotBefore.HasZulu)
+			}
+			if encodingInfo.NotAfter != nil {
+				notAfterNode.Children["encoding"] = node.New("encoding", encodingInfo.NotAfter.Tag)
+				notAfterNode.Children["format"] = node.New("format", encodingInfo.NotAfter.RawString)
+				notAfterNode.Children["isUTC"] = node.New("isUTC", encodingInfo.NotAfter.IsUTC)
+				notAfterNode.Children["hasSeconds"] = node.New("hasSeconds", encodingInfo.NotAfter.HasSeconds)
+				notAfterNode.Children["hasZulu"] = node.New("hasZulu", encodingInfo.NotAfter.HasZulu)
+			}
+		}
+	}
+
+	n.Children["notBefore"] = notBeforeNode
+	n.Children["notAfter"] = notAfterNode
 	return n
 }
 
@@ -243,6 +272,8 @@ func buildSubjectPublicKeyInfo(cert *x509.Certificate) *node.Node {
 			n.Children["publicKey"] = buildRSAKey(key)
 		case *ecdsa.PublicKey:
 			n.Children["publicKey"] = buildECDSAKey(key)
+		case ed25519.PublicKey:
+			n.Children["publicKey"] = buildEd25519Key(key)
 		default:
 			n.Children["publicKey"] = node.New("publicKey", cert.PublicKey)
 		}
@@ -380,10 +411,60 @@ func buildECDSAKey(key *ecdsa.PublicKey) *node.Node {
 	return n
 }
 
+func buildEd25519Key(key ed25519.PublicKey) *node.Node {
+	n := node.New("publicKey", nil)
+	n.Children["keySize"] = node.New("keySize", len(key)*8) // Ed25519 key size in bits
+	return n
+}
+
 func buildSCT(sct interface{}, index int) *node.Node {
 	n := node.New(fmt.Sprintf("%d", index), nil)
-	// SCT contains: LogID, Timestamp, Extensions, Signature
-	// We store basic presence info; detailed validation in operators
 	n.Children["present"] = node.New("present", true)
+
+	// Try to cast to ct.SignedCertificateTimestamp
+	ctSCT, ok := sct.(*ct.SignedCertificateTimestamp)
+	if !ok {
+		// Fallback for unknown SCT type
+		return n
+	}
+
+	// Version (V1=0 per RFC 6962/9162)
+	n.Children["version"] = node.New("version", int(ctSCT.SCTVersion))
+	n.Children["versionString"] = node.New("versionString", ctSCT.SCTVersion.String())
+
+	// LogID - 32 bytes SHA-256 hash of log's public key
+	if len(ctSCT.LogID) == 32 {
+		n.Children["logID"] = node.New("logID", ctSCT.LogID[:])
+		n.Children["logIDHex"] = node.New("logIDHex", hex.EncodeToString(ctSCT.LogID[:]))
+	}
+
+	// Timestamp - milliseconds since Unix epoch
+	n.Children["timestamp"] = node.New("timestamp", ctSCT.Timestamp)
+	// Convert to time.Time for easier validation
+	timestampTime := time.Unix(0, int64(ctSCT.Timestamp)*int64(time.Millisecond))
+	n.Children["timestampTime"] = node.New("timestampTime", timestampTime)
+
+	// Extensions - optional
+	if len(ctSCT.Extensions) > 0 {
+		n.Children["extensions"] = node.New("extensions", ctSCT.Extensions)
+		n.Children["extensionsLen"] = node.New("extensionsLen", len(ctSCT.Extensions))
+	} else {
+		n.Children["extensionsLen"] = node.New("extensionsLen", 0)
+	}
+
+	// Signature - DigitallySigned structure
+	sigNode := node.New("signature", nil)
+	sigNode.Children["hashAlgorithm"] = node.New("hashAlgorithm", ctSCT.Signature.HashAlgorithm.String())
+	sigNode.Children["hashAlgorithmValue"] = node.New("hashAlgorithmValue", int(ctSCT.Signature.HashAlgorithm))
+	sigNode.Children["signatureAlgorithm"] = node.New("signatureAlgorithm", ctSCT.Signature.SignatureAlgorithm.String())
+	sigNode.Children["signatureAlgorithmValue"] = node.New("signatureAlgorithmValue", int(ctSCT.Signature.SignatureAlgorithm))
+	sigNode.Children["signatureValue"] = node.New("signatureValue", ctSCT.Signature.Signature)
+	sigNode.Children["signatureValueHex"] = node.New("signatureValueHex", hex.EncodeToString(ctSCT.Signature.Signature))
+	n.Children["signature"] = sigNode
+
+	// Combined signature algorithm string (e.g., "SHA256-ECDSA")
+	sigAlgStr := fmt.Sprintf("%s-%s", ctSCT.Signature.HashAlgorithm.String(), ctSCT.Signature.SignatureAlgorithm.String())
+	n.Children["signatureAlgorithmString"] = node.New("signatureAlgorithmString", sigAlgStr)
+
 	return n
 }

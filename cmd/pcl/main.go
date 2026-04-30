@@ -15,7 +15,7 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 		Use:   "pcl",
 		Short: "Policy-based X.509 certificate linter",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.PolicyPath == "" {
+			if len(opts.PolicyPaths) == 0 {
 				return fmt.Errorf("--policy is required")
 			}
 			hasCert := opts.CertPath != "" || len(opts.CertURLs) > 0
@@ -27,7 +27,7 @@ func newRootCmd(opts *linter.Config) *cobra.Command {
 		},
 	}
 
-	root.Flags().StringVar(&opts.PolicyPath, "policy", "", "Path to policy YAML file or directory")
+	root.Flags().StringSliceVar(&opts.PolicyPaths, "policy", nil, "Path to policy YAML file or directory (repeatable)")
 	root.Flags().StringVar(&opts.CertPath, "cert", "", "Path to certificate file or directory (PEM/DER)")
 	root.Flags().StringSliceVar(&opts.CertURLs, "cert-url", nil, "Certificate URL (repeatable)")
 	root.Flags().DurationVar(&opts.CertTimeout, "cert-url-timeout", 10*time.Second, "Certificate URL timeout (e.g. 10s, 1m)")

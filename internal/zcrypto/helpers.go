@@ -53,6 +53,33 @@ func BuildPkixName(name string, pkixName pkix.Name) *node.Node {
 	if pkixName.SerialNumber != "" {
 		n.Children["serialNumber"] = node.New("serialNumber", pkixName.SerialNumber)
 	}
+	if len(pkixName.OrganizationIDs) > 0 {
+		n.Children["organizationIdentifier"] = node.New("organizationIdentifier", pkixName.OrganizationIDs[0])
+	}
+
+	// EV-specific fields
+	if len(pkixName.JurisdictionCountry) > 0 {
+		n.Children["jurisdictionCountryName"] = node.New("jurisdictionCountryName", pkixName.JurisdictionCountry[0])
+	}
+	if len(pkixName.JurisdictionProvince) > 0 {
+		n.Children["jurisdictionStateOrProvinceName"] = node.New("jurisdictionStateOrProvinceName", pkixName.JurisdictionProvince[0])
+	}
+	if len(pkixName.JurisdictionLocality) > 0 {
+		n.Children["jurisdictionLocalityName"] = node.New("jurisdictionLocalityName", pkixName.JurisdictionLocality[0])
+	}
+
+	// Parse additional attributes from Names (e.g., businessCategory)
+	// OID 2.5.4.15 = businessCategory
+	for _, atv := range pkixName.Names {
+		if len(atv.Type) == 4 && atv.Type[0] == 2 && atv.Type[1] == 5 && atv.Type[2] == 4 {
+			switch atv.Type[3] {
+			case 15: // businessCategory (2.5.4.15)
+				if val, ok := atv.Value.(string); ok {
+					n.Children["businessCategory"] = node.New("businessCategory", val)
+				}
+			}
+		}
+	}
 
 	return n
 }

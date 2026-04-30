@@ -25,24 +25,29 @@ import (
 func Run(cfg Config, w io.Writer) error {
 	applyDefaults(&cfg)
 
-	// Check if path is a directory first
-	isDir, err := isDirectory(cfg.PolicyPath)
-	if err != nil {
-		return fmt.Errorf("checking policy path: %w", err)
-	}
-
+	// Load policies from all specified paths
 	var policies []policy.Policy
-	if isDir {
-		policies, err = policy.ParseDir(cfg.PolicyPath)
-		if err != nil {
-			return fmt.Errorf("failed to parse policy directory: %w", err)
+	var err error
+	for _, policyPath := range cfg.PolicyPaths {
+		// Check if path is a directory first
+		isDir, err2 := isDirectory(policyPath)
+		if err2 != nil {
+			return fmt.Errorf("checking policy path %s: %w", policyPath, err2)
 		}
-	} else {
-		p, err := policy.ParseFile(cfg.PolicyPath)
-		if err != nil {
-			return fmt.Errorf("failed to parse policy file: %w", err)
+
+		if isDir {
+			p, err2 := policy.ParseDir(policyPath)
+			if err2 != nil {
+				return fmt.Errorf("failed to parse policy directory %s: %w", policyPath, err2)
+			}
+			policies = append(policies, p...)
+		} else {
+			p, err2 := policy.ParseFile(policyPath)
+			if err2 != nil {
+				return fmt.Errorf("failed to parse policy file %s: %w", policyPath, err2)
+			}
+			policies = append(policies, p)
 		}
-		policies = append(policies, p)
 	}
 
 	reg := operator.DefaultRegistry()
@@ -228,7 +233,15 @@ func Run(cfg Config, w io.Writer) error {
 				continue
 			}
 
-			crlNode := crlzcrypto.BuildTree(crlInfo.CRL)
+			// Build issuer certificates list for CRL type detection
+			var issuerCerts []*x509.Certificate
+			for _, issuer := range issuers {
+				if issuer.Cert != nil {
+					issuerCerts = append(issuerCerts, issuer.Cert)
+				}
+			}
+
+			crlNode := crlzcrypto.BuildTreeWithChain(crlInfo.CRL, issuerCerts)
 			if crlNode == nil {
 				continue
 			}

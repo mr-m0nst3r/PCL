@@ -54,35 +54,51 @@ func (Contains) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bo
 	if n == nil {
 		return false, nil
 	}
-	if len(operands) != 1 {
-		return false, fmt.Errorf("contains requires exactly 1 operand")
+	if len(operands) == 0 {
+		return false, fmt.Errorf("contains requires at least 1 operand")
 	}
-
-	target := operands[0]
 
 	val := reflect.ValueOf(n.Value)
 	if val.Kind() == reflect.Slice || val.Kind() == reflect.Array {
 		for i := 0; i < val.Len(); i++ {
-			if equal(val.Index(i).Interface(), target) {
-				return true, nil
+			for _, target := range operands {
+				if equal(val.Index(i).Interface(), target) {
+					return true, nil
+				}
 			}
 		}
 		return false, nil
 	}
 
 	if len(n.Children) > 0 {
+		// First check child values
 		for _, child := range n.Children {
-			if equal(child.Value, target) {
-				return true, nil
+			for _, target := range operands {
+				if equal(child.Value, target) {
+					return true, nil
+				}
+			}
+		}
+		// Also check child names (for cases like certificatePolicies where key is OID)
+		for name := range n.Children {
+			for _, target := range operands {
+				if equal(name, target) {
+					return true, nil
+				}
 			}
 		}
 		return false, nil
 	}
 
 	if str, ok := n.Value.(string); ok {
-		if substr, ok := target.(string); ok {
-			return len(str) > 0 && len(substr) > 0 && strings.Contains(str, substr), nil
+		for _, target := range operands {
+			if substr, ok := target.(string); ok {
+				if len(str) > 0 && len(substr) > 0 && strings.Contains(str, substr) {
+					return true, nil
+				}
+			}
 		}
+		return false, nil
 	}
 
 	return false, fmt.Errorf("contains requires a slice, array, node with children, or string")

@@ -150,8 +150,21 @@ func TestContainsWrongOperands(t *testing.T) {
 		t.Error("should error with no operands")
 	}
 
-	_, err = op.Evaluate(n, nil, []any{"a", "b"})
-	if err == nil {
-		t.Error("should error with too many operands")
+	// Multiple operands now allowed (any match semantics)
+	result, err := op.Evaluate(n, nil, []any{"a", "b"})
+	if err != nil {
+		t.Error("multiple operands should now be allowed")
+	}
+	if !result {
+		t.Error("should match 'a' in slice")
+	}
+
+	// Test multiple operands with no match
+	result, err = op.Evaluate(n, nil, []any{"x", "y"})
+	if err != nil {
+		t.Error("multiple operands should be allowed")
+	}
+	if result {
+		t.Error("should not match 'x' or 'y' in slice")
 	}
 }

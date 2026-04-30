@@ -59,51 +59,44 @@ type CRLSignedBy struct{}
 func (CRLSignedBy) Name() string { return "crlSignedBy" }
 
 func (CRLSignedBy) Evaluate(_ *node.Node, ctx *EvaluationContext, _ []any) (bool, error) {
-	if !ctx.HasCRLs() || !ctx.HasChain() {
+	if !ctx.HasCRLs() {
 		return false, nil
 	}
 
-	// Track if we found any applicable CRL (CRL whose issuer is in chain)
-	var foundApplicableCRL bool
+	if !ctx.HasChain() {
+		return false, nil
+	}
+
 	for _, crlInfo := range ctx.CRLs {
 		if crlInfo.CRL == nil {
 			continue
 		}
 		crl := crlInfo.CRL
 
-		// Find issuer in chain
-		var crlIssuerInChain *x509.Certificate
-		for _, certInfo := range ctx.Chain {
-			if certInfo.Cert == nil {
+		// Find matching issuer from chain
+		crlIssuer := crl.Issuer.String()
+		var matchingIssuer *x509.Certificate
+		for _, issuerInfo := range ctx.Chain {
+			if issuerInfo.Cert == nil {
 				continue
 			}
-
-			if crl.Issuer.String() != certInfo.Cert.Subject.String() {
-				continue
+			if issuerInfo.Cert.Subject.String() == crlIssuer {
+				matchingIssuer = issuerInfo.Cert
+				break
 			}
-
-			crlIssuerInChain = certInfo.Cert
-			break
 		}
 
-		// If CRL issuer not in chain, skip this CRL (can't verify)
-		if crlIssuerInChain == nil {
+		// If issuer not in chain, skip this CRL (not applicable to our chain)
+		if matchingIssuer == nil {
 			continue
 		}
 
-		foundApplicableCRL = true
-
-		// Verify signature
-		err := crl.CheckSignatureFrom(crlIssuerInChain)
-		if err != nil {
+		// Verify signature only for applicable CRLs (issuer in chain)
+		if err := crl.CheckSignatureFrom(matchingIssuer); err != nil {
 			return false, nil
 		}
 	}
 
-	// If we found and verified at least one applicable CRL, return true
-	// If no CRLs were applicable (all skipped - issuers not in chain), return true (not applicable)
-	// The cert-not-revoked rule handles checking revocation status
-	_ = foundApplicableCRL // track for future use
 	return true, nil
 }
 
@@ -112,17 +105,17 @@ type NotRevoked struct{}
 func (NotRevoked) Name() string { return "notRevoked" }
 
 func (NotRevoked) Evaluate(_ *node.Node, ctx *EvaluationContext, _ []any) (bool, error) {
-	if !ctx.HasCert() {
+	if ctx == nil || ctx.Cert == nil || ctx.Cert.Cert == nil {
 		return false, nil
-	}
-
-	if len(ctx.CRLs) == 0 {
-		return true, nil
 	}
 
 	cert := ctx.Cert.Cert
 	certSerial := cert.SerialNumber.String()
 	certIssuer := cert.Issuer.String()
+
+	if !ctx.HasCRLs() {
+		return true, nil // No CRLs = not revoked
+	}
 
 	for _, crlInfo := range ctx.CRLs {
 		if crlInfo.CRL == nil {

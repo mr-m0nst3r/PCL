@@ -24,6 +24,29 @@ func BuildTree(crl *x509.RevocationList) *node.Node {
 	return NewCRLBuilder().Build(crl)
 }
 
+// BuildTreeWithChain builds CRL node tree with CA status determined from issuer chain.
+// isCACRL is set to true if the CRL issuer is a CA certificate (Root or Intermediate).
+func BuildTreeWithChain(crl *x509.RevocationList, issuerCerts []*x509.Certificate) *node.Node {
+	n := buildCRL(crl)
+	if n == nil {
+		return nil
+	}
+
+	// Determine if CRL issuer is a CA
+	isCACRL := false
+	crlIssuer := crl.Issuer.String()
+
+	for _, cert := range issuerCerts {
+		if cert != nil && cert.Subject.String() == crlIssuer {
+			isCACRL = cert.IsCA
+			break
+		}
+	}
+
+	n.Children["isCACRL"] = node.New("isCACRL", isCACRL)
+	return n
+}
+
 func buildCRL(crl *x509.RevocationList) *node.Node {
 	root := node.New("crl", nil)
 
@@ -151,8 +174,36 @@ func buildRevokedCertificates(revoked []x509.RevokedCertificate) *node.Node {
 		}
 		rcNode.Children["revocationDate"] = node.New("revocationDate", rc.RevocationTime)
 
+		// Add parsed reason code if present
+		if rc.ReasonCode != nil {
+			extNode := node.New("2.5.29.21", nil)
+			extNode.Children["oid"] = node.New("oid", "2.5.29.21")
+			extNode.Children["critical"] = node.New("critical", false)
+			extNode.Children["value"] = node.New("value", *rc.ReasonCode)
+			extsNode := node.New("extensions", nil)
+			extsNode.Children["2.5.29.21"] = extNode
+			rcNode.Children["extensions"] = extsNode
+		}
+
+		// Also keep raw extensions for other extension types
 		if len(rc.Extensions) > 0 {
-			rcNode.Children["extensions"] = zcrypto.BuildExtensions(rc.Extensions)
+			// Merge with existing extensions node or create new one
+			extsNode := rcNode.Children["extensions"]
+			if extsNode == nil {
+				extsNode = node.New("extensions", nil)
+				rcNode.Children["extensions"] = extsNode
+			}
+			for _, ext := range rc.Extensions {
+				// Skip reason code - already handled above
+				if ext.Id.String() == "2.5.29.21" {
+					continue
+				}
+				extNode := node.New(ext.Id.String(), nil)
+				extNode.Children["oid"] = node.New("oid", ext.Id.String())
+				extNode.Children["critical"] = node.New("critical", ext.Critical)
+				extNode.Children["value"] = node.New("value", ext.Value)
+				extsNode.Children[ext.Id.String()] = extNode
+			}
 		}
 
 		n.Children[fmt.Sprintf("%d", i)] = rcNode

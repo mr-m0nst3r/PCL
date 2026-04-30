@@ -49,15 +49,22 @@ var oidNameMap = map[string]string{
 	"2.5.29.29":                "issuingDistributionPoint",
 
 	// Built-in cert types
-	"ca":  "ca",
-	"leaf": "leaf",
+	"ca":         "ca",
+	"root":       "root",
+	"intermediate": "intermediate",
+	"leaf":       "leaf",
 }
 
 // normalizeOID converts human-readable name to OID or returns the OID if already an OID
 func normalizeOID(nameOrOID string) string {
 	if oid, ok := oidNameMap[nameOrOID]; ok {
 		// If input is a name, return the OID
-		if len(oid) > 10 && oid[0:4] != "ca" && oid[0:4] != "leaf" {
+		// Built-in types (ca, root, intermediate, leaf) are not OIDs
+		if oid == "ca" || oid == "root" || oid == "intermediate" || oid == "leaf" {
+			return oid
+		}
+		// Other names are OID mappings
+		if len(oid) > 10 {
 			return oid
 		}
 	}
@@ -140,6 +147,20 @@ func policyAppliesToCert(p policy.Policy, cert *x509.Certificate) bool {
 		// Built-in types
 		if ct == "ca" {
 			if cert.BasicConstraintsValid && cert.IsCA {
+				return true
+			}
+			continue
+		}
+		if ct == "root" {
+			// Root CA: self-signed (Subject == Issuer) and isCA
+			if cert.BasicConstraintsValid && cert.IsCA && cert.Subject.String() == cert.Issuer.String() {
+				return true
+			}
+			continue
+		}
+		if ct == "intermediate" {
+			// Intermediate CA: has different issuer (not self-signed) and isCA
+			if cert.BasicConstraintsValid && cert.IsCA && cert.Subject.String() != cert.Issuer.String() {
 				return true
 			}
 			continue

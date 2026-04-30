@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/cavoq/PCL/internal/node"
@@ -58,19 +57,36 @@ type Matches struct{}
 func (Matches) Name() string { return "matches" }
 
 func (Matches) Evaluate(n *node.Node, ctx *EvaluationContext, operands []any) (bool, error) {
-	if n == nil || len(operands) != 1 {
+	if n == nil || len(operands) == 0 {
 		return false, nil
 	}
 
-	path, ok := operands[0].(string)
-	if !ok {
-		return false, fmt.Errorf("matches operator requires a string path operand")
+	// Support multiple path operands - any match is OK
+	for _, op := range operands {
+		path, ok := op.(string)
+		if !ok {
+			continue
+		}
+
+		target, found := ctx.Root.Resolve(path)
+		if !found || target == nil {
+			continue
+		}
+
+		// Check if target is a parent node with indexed children (array-like)
+		if len(target.Children) > 0 && target.Value == nil {
+			for _, child := range target.Children {
+				if reflect.DeepEqual(n.Value, child.Value) {
+					return true, nil
+				}
+			}
+		} else {
+			// Single value comparison
+			if reflect.DeepEqual(n.Value, target.Value) {
+				return true, nil
+			}
+		}
 	}
 
-	target, found := ctx.Root.Resolve(path)
-	if !found || target == nil {
-		return false, nil
-	}
-
-	return reflect.DeepEqual(n.Value, target.Value), nil
+	return false, nil
 }

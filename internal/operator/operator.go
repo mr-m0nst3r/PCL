@@ -56,7 +56,36 @@ var All = []Operator{
 	OCSPValid{},
 	NotRevokedOCSP{},
 	OCSPGood{},
+	// Generic operators
+	Every{},
+	DateDiff{},
 	NameConstraintsValid{},
 	CertificatePolicyValid{},
 	IsNull{},
+	// Generic component validation operators (useful for DNS labels, path segments, etc.)
+	ComponentMaxLength{},
+	ComponentMinLength{},
+	ComponentRegex{},
+	ComponentNotRegex{},
+	// UTF-8 validation operators
+	UTF8NoBOM{},
+	ContainsBOM{},
+	// Subject DN validation operators
+	NoDuplicateAttributes{},
+	// Unique value operators (for AIA, CRL DP, etc.)
+	UniqueValues{},
+	UniqueChildren{},
+	// Time format validation operators (ASN.1)
+	UTCTimeHasZulu{},
+	UTCTimeHasSeconds{},
+	GeneralizedTimeHasZulu{},
+	GeneralizedTimeNoFraction{},
+	IsUTCTime{},
+	IsGeneralizedTime{},
+	// Encoding validation operators (ASN.1)
+	IsIA5String{},
+	IsPrintableString{},
+	IsUTF8String{},
+	ValidIA5String{},
+	ValidPrintableString{},
 }
