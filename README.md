@@ -11,8 +11,10 @@ A flexible X.509 certificate linter that validates certificates against configur
 
 ```bash
 go install github.com/cavoq/PCL/cmd/pcl@latest
-pcl --policy <path> --cert <path> [--crl <path>] [--ocsp <path>] [--output text|json|yaml]
+pcl --policy <path> [--policy <path>...] --cert <path> [--crl <path>] [--ocsp <path>] [--output text|json|yaml]
 ```
+
+Multiple policies can be specified with repeatable `--policy` flags. All rules from all policies will be applied.
 
 By default, only failed rules are shown. Use `-v` to include passed rules and `-vv` to include skipped rules.
 
@@ -199,11 +201,19 @@ rules:
 - [RFC 5758](https://datatracker.ietf.org/doc/html/rfc5758) - DSA and ECDSA with SHA2
 - [RFC 5759](https://datatracker.ietf.org/doc/html/rfc5759) - Suite B Certificate and CRL Profile
 - [RFC 6960](https://datatracker.ietf.org/doc/html/rfc6960) - Online Certificate Status Protocol (OCSP)
+- [RFC 8017](https://datatracker.ietf.org/doc/html/rfc8017) - PKCS #1: RSA Cryptography Specifications v2.2 (security recommendations)
+- [RFC 8410](https://datatracker.ietf.org/doc/html/rfc8410) - Algorithm Identifiers for Ed25519, Ed448, X25519, and X448
 - [RFC 8813](https://datatracker.ietf.org/doc/html/rfc8813) - Updates to RFC 5480
+- [RFC 9162](https://datatracker.ietf.org/doc/html/rfc9162) - Certificate Transparency Version 2.0
 - [RFC 5019](https://datatracker.ietf.org/doc/html/rfc5019) - Lightweight OCSP Profile for High-Volume Environments
 - [RFC 9608](https://datatracker.ietf.org/doc/html/rfc9608) - No Revocation Available for X.509 Certificates
+- [RFC 9549](https://datatracker.ietf.org/doc/html/rfc9549) - Internationalization Updates to RFC 5280 (IDN, DNS labels)
+- [RFC 9598](https://datatracker.ietf.org/doc/html/rfc9598) - Internationalized Email Addresses in X.509 (rfc822Name)
 - [RFC 9654](https://datatracker.ietf.org/doc/html/rfc9654) - OCSP Nonce Extension
-- CA/Browser Forum Baseline Requirements
+- CA/Browser Forum Baseline Requirements (BR)
+- CA/Browser Forum Extended Validation Guidelines (EVG)
+- CA/Browser Forum S/MIME Baseline Requirements (SMIME BR)
+- CA/Browser Forum Code Signing Baseline Requirements (CS BR)
 
 
 ## ➕ Supported Operators
@@ -232,6 +242,9 @@ rules:
 | `odd` | Value is an odd number (for RSA exponent validation) |
 | `maxLength`, `minLength` | String/array length constraints |
 | `regex`, `notRegex` | Regular expression pattern matching |
+| `componentMaxLength`, `componentMinLength` | Per-component length validation (DNS labels, path segments) |
+| `componentRegex`, `componentNotRegex` | Per-component regex validation |
+| `utf8NoBom`, `containsBom` | UTF-8 BOM detection |
 
 ### Date Operators
 
@@ -241,6 +254,8 @@ rules:
 | `after` | Date is after current time |
 | `validityOrderCorrect` | Validates notBefore < notAfter |
 | `validityDays` | Certificate validity period check |
+| `dateDiff` | Date difference validation with maxDays/maxMonths limits (for CRL nextUpdate) |
+| `every` | Generic array iteration with sub-path and operator check (for CRL entries) |
 
 ### Extension Operators
 
@@ -270,6 +285,14 @@ rules:
 | `ekuServerAuth`, `ekuClientAuth` | TLS authentication EKU checks |
 | `noUniqueIdentifiers` | Absence of issuer/subject unique IDs |
 
+### Collection/Array Operators
+
+| Operator | Description |
+|----------|-------------|
+| `uniqueValues` | All children have unique values (for CRL DP, AIA URLs) |
+| `uniqueChildren` | All children have unique string values |
+| `noDuplicateAttributes` | Subject DN has no duplicate AttributeTypeAndValue |
+
 ### CRL Operators
 
 | Operator | Description |
@@ -278,6 +301,9 @@ rules:
 | `crlNotExpired` | CRL nextUpdate is in the future |
 | `crlSignedBy` | CRL signature verification against chain |
 | `notRevoked` | Certificate not in CRL revoked list |
+| `crlEntryHasReasonCode` | Revoked certificate entry has reason code extension (OID 2.5.29.21) |
+| `crlEntryReasonValid` | Revocation reason code is valid (0-10, except 7) |
+| `crlEntriesAllHaveReason` | All revoked entries have reason code extensions |
 
 ### OCSP Operators
 
@@ -293,6 +319,27 @@ rules:
 |----------|-------------|
 | `nameConstraintsValid` | Validates names against permitted/excluded subtrees from chain |
 | `certificatePolicyValid` | Validates policy OIDs through chain with mappings and constraints |
+
+### ASN.1 Time Format Operators
+
+| Operator | Description |
+|----------|-------------|
+| `utctimeHasZulu` | UTCTime ends with 'Z' (RFC 5280 4.1.2.5.1) |
+| `utctimeHasSeconds` | UTCTime includes seconds (RFC 5280 4.1.2.5.1) |
+| `generalizedTimeHasZulu` | GeneralizedTime ends with 'Z' (RFC 5280 4.1.2.5.2) |
+| `generalizedTimeNoFraction` | GeneralizedTime has no fractional seconds (recommended) |
+| `isUTCTime` | Time encoding is UTCTime (tag 23) |
+| `isGeneralizedTime` | Time encoding is GeneralizedTime (tag 24) |
+
+### ASN.1 Encoding Operators
+
+| Operator | Description |
+|----------|-------------|
+| `isIA5String` | Value uses IA5String encoding (ASCII) |
+| `isPrintableString` | Value uses PrintableString encoding |
+| `isUTF8String` | Value uses UTF8String encoding |
+| `validIA5String` | All characters valid for IA5String (ASCII) |
+| `validPrintableString` | All characters valid for PrintableString |
 
 ## 🔀 Conditional Rules
 
@@ -349,11 +396,13 @@ Example: EV certificates should have SCT embedded (warning), while AIA extension
 
 ## Certificate Chain Support
 
-PCL automatically builds and validates certificate chains, applying rules based on certificate position:
+PCL automatically builds and validates certificate chains, applying rules based on certificate position and BasicConstraints:
 
-- `leaf`: End-entity certificates
-- `intermediate`: CA certificates in the chain
-- `root`: Self-signed root CA certificates
+- `leaf`: End-entity certificates (position 0, no BasicConstraints or IsCA=false)
+- `intermediate`: Subordinate CA certificates (position 0+ with IsCA=true, not self-signed)
+- `root`: Self-signed root CA certificates (IsCA=true, Subject==Issuer)
+
+**Enhanced Detection:** At position 0, PCL checks BasicConstraints to correctly identify CA certificates even when linted directly (without a subscriber certificate chain). This allows linting intermediate CA certificates standalone.
 
 Use `appliesTo` in rules to target specific certificate types.
 
@@ -441,14 +490,19 @@ crl
 ├── issuer                 # Same as certificate
 ├── thisUpdate             # time.Time
 ├── nextUpdate             # time.Time
+├── isCACRL                # Boolean: true if issuer is a CA certificate (requires --issuer)
 ├── revokedCertificates
 │   ├── <serial>           # Each revoked cert
 │   │   ├── serialNumber
 │   │   ├── revocationDate
 │   │   ├── revocationReason
+│   │   └── extensions
+│   │       └── 2.5.29.21  # reasonCode extension
 └── extensions
     └── ...
 ```
+
+**CRL Type Detection:** The `isCACRL` field enables differentiation between Subscriber CRLs and CA CRLs (BR 7.2). This requires providing issuer certificates via `--issuer`.
 
 ### OCSP Node Tree
 
