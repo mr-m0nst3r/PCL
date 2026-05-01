@@ -114,6 +114,11 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 		root.Children["subjectAltName"] = buildSubjectAltName(cert)
 	}
 
+	// Add Name Constraints (for CA certificates)
+	if hasNameConstraints(cert) {
+		root.Children["nameConstraints"] = buildNameConstraints(cert)
+	}
+
 	if len(cert.Signature) > 0 {
 		root.Children["signatureValue"] = node.New("signatureValue", cert.Signature)
 	}
@@ -499,4 +504,113 @@ func buildSCT(sct interface{}, index int) *node.Node {
 	n.Children["signatureAlgorithmString"] = node.New("signatureAlgorithmString", sigAlgStr)
 
 	return n
+}
+
+func hasNameConstraints(cert *x509.Certificate) bool {
+	return len(cert.PermittedDNSNames) > 0 ||
+		len(cert.ExcludedDNSNames) > 0 ||
+		len(cert.PermittedEmailAddresses) > 0 ||
+		len(cert.ExcludedEmailAddresses) > 0 ||
+		len(cert.PermittedURIs) > 0 ||
+		len(cert.ExcludedURIs) > 0 ||
+		len(cert.PermittedIPAddresses) > 0 ||
+		len(cert.ExcludedIPAddresses) > 0 ||
+		len(cert.PermittedDirectoryNames) > 0 ||
+		len(cert.ExcludedDirectoryNames) > 0
+}
+
+func buildNameConstraints(cert *x509.Certificate) *node.Node {
+	n := node.New("nameConstraints", nil)
+
+	// Critical flag
+	n.Children["critical"] = node.New("critical", cert.NameConstraintsCritical)
+
+	// Permitted subtrees
+	if len(cert.PermittedDNSNames) > 0 ||
+		len(cert.PermittedEmailAddresses) > 0 ||
+		len(cert.PermittedURIs) > 0 ||
+		len(cert.PermittedIPAddresses) > 0 ||
+		len(cert.PermittedDirectoryNames) > 0 {
+		permittedNode := node.New("permittedSubtrees", nil)
+		buildGeneralSubtrees(permittedNode, "dNSName", cert.PermittedDNSNames)
+		buildGeneralSubtrees(permittedNode, "rfc822Name", cert.PermittedEmailAddresses)
+		buildGeneralSubtrees(permittedNode, "uniformResourceIdentifier", cert.PermittedURIs)
+		buildGeneralSubtreeIPs(permittedNode, "iPAddress", cert.PermittedIPAddresses)
+		buildGeneralSubtreeNames(permittedNode, "directoryName", cert.PermittedDirectoryNames)
+		n.Children["permittedSubtrees"] = permittedNode
+	}
+
+	// Excluded subtrees
+	if len(cert.ExcludedDNSNames) > 0 ||
+		len(cert.ExcludedEmailAddresses) > 0 ||
+		len(cert.ExcludedURIs) > 0 ||
+		len(cert.ExcludedIPAddresses) > 0 ||
+		len(cert.ExcludedDirectoryNames) > 0 {
+		excludedNode := node.New("excludedSubtrees", nil)
+		buildGeneralSubtrees(excludedNode, "dNSName", cert.ExcludedDNSNames)
+		buildGeneralSubtrees(excludedNode, "rfc822Name", cert.ExcludedEmailAddresses)
+		buildGeneralSubtrees(excludedNode, "uniformResourceIdentifier", cert.ExcludedURIs)
+		buildGeneralSubtreeIPs(excludedNode, "iPAddress", cert.ExcludedIPAddresses)
+		buildGeneralSubtreeNames(excludedNode, "directoryName", cert.ExcludedDirectoryNames)
+		n.Children["excludedSubtrees"] = excludedNode
+	}
+
+	return n
+}
+
+func buildGeneralSubtrees(parent *node.Node, name string, subtrees []x509.GeneralSubtreeString) {
+	if len(subtrees) == 0 {
+		return
+	}
+	subtreeNode := node.New(name, nil)
+	for i, subtree := range subtrees {
+		child := node.New(fmt.Sprintf("%d", i), nil)
+		child.Children["value"] = node.New("value", subtree.Data)
+		if subtree.Min > 0 {
+			child.Children["min"] = node.New("min", subtree.Min)
+		}
+		if subtree.Max > 0 {
+			child.Children["max"] = node.New("max", subtree.Max)
+		}
+		subtreeNode.Children[fmt.Sprintf("%d", i)] = child
+	}
+	parent.Children[name] = subtreeNode
+}
+
+func buildGeneralSubtreeIPs(parent *node.Node, name string, subtrees []x509.GeneralSubtreeIP) {
+	if len(subtrees) == 0 {
+		return
+	}
+	subtreeNode := node.New(name, nil)
+	for i, subtree := range subtrees {
+		child := node.New(fmt.Sprintf("%d", i), nil)
+		child.Children["value"] = node.New("value", subtree.Data.String())
+		if subtree.Min > 0 {
+			child.Children["min"] = node.New("min", subtree.Min)
+		}
+		if subtree.Max > 0 {
+			child.Children["max"] = node.New("max", subtree.Max)
+		}
+		subtreeNode.Children[fmt.Sprintf("%d", i)] = child
+	}
+	parent.Children[name] = subtreeNode
+}
+
+func buildGeneralSubtreeNames(parent *node.Node, name string, subtrees []x509.GeneralSubtreeName) {
+	if len(subtrees) == 0 {
+		return
+	}
+	subtreeNode := node.New(name, nil)
+	for i, subtree := range subtrees {
+		child := node.New(fmt.Sprintf("%d", i), nil)
+		child.Children["value"] = zcrypto.BuildPkixName("value", subtree.Data)
+		if subtree.Min > 0 {
+			child.Children["min"] = node.New("min", subtree.Min)
+		}
+		if subtree.Max > 0 {
+			child.Children["max"] = node.New("max", subtree.Max)
+		}
+		subtreeNode.Children[fmt.Sprintf("%d", i)] = child
+	}
+	parent.Children[name] = subtreeNode
 }
