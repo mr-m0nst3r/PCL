@@ -80,6 +80,15 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 					}
 				}
 			}
+			if oidStr == "2.5.29.32" {
+				certPoliciesNode := ParseCertPolicies(ext.Value)
+				if extNode, ok := root.Children["extensions"].Children["certificatePolicies"]; ok {
+					// Merge parsed Certificate Policies into extension node
+					for k, v := range certPoliciesNode.Children {
+						extNode.Children[k] = v
+					}
+				}
+			}
 		}
 	}
 

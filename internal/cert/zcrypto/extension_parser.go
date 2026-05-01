@@ -338,3 +338,207 @@ func decodeReasonFlags(n *node.Node, bytes []byte, unusedBits int) {
 		}
 	}
 }
+
+// Certificate Policies OID: 2.5.29.32
+const certPoliciesOID = "2.5.29.32"
+
+// Policy Qualifier Type OIDs
+const (
+	idQtCps     = "1.3.6.1.5.5.7.2.1" // CPS URI
+	idQtUnotice = "1.3.6.1.5.5.7.2.2" // UserNotice
+)
+
+// ParseCertPolicies parses the Certificate Policies extension (OID 2.5.29.32)
+// and returns a node tree with policyInformations and policyQualifiers.
+//
+// ASN.1 structure (RFC 5280 4.2.1.4):
+//   CertificatePolicies ::= SEQUENCE SIZE (1..MAX) OF PolicyInformation
+//   PolicyInformation ::= SEQUENCE {
+//       policyIdentifier   OBJECT IDENTIFIER,
+//       policyQualifiers   SEQUENCE SIZE (1..MAX) OF PolicyQualifierInfo OPTIONAL }
+//   PolicyQualifierInfo ::= SEQUENCE {
+//       policyQualifierId  OBJECT IDENTIFIER,
+//       qualifier          ANY DEFINED BY policyQualifierId }
+//
+// Qualifier types:
+//   id-qt-cps (1.3.6.1.5.5.7.2.1): CPS URI - IA5String
+//   id-qt-unotice (1.3.6.1.5.5.7.2.2): UserNotice - SEQUENCE { noticeRef, explicitText }
+func ParseCertPolicies(extValue []byte) *node.Node {
+	n := node.New("certificatePolicies", nil)
+	policiesNode := node.New("policyInformations", nil)
+	n.Children["policyInformations"] = policiesNode
+
+	input := cryptobyte.String(extValue)
+
+	var policies cryptobyte.String
+	if !input.ReadASN1(&policies, cryptobyte_asn1.SEQUENCE) {
+		return n
+	}
+
+	if len(policies) == 0 {
+		n.Children["empty"] = node.New("empty", true)
+		return n
+	}
+
+	idx := 0
+
+	for len(policies) > 0 {
+		var policy cryptobyte.String
+		if !policies.ReadASN1(&policy, cryptobyte_asn1.SEQUENCE) {
+			break
+		}
+
+		policyNode := node.New(fmt.Sprintf("%d", idx), nil)
+
+		// Read policyIdentifier (OID)
+		var policyOID cryptobyte.String
+		if !policy.ReadASN1(&policyOID, cryptobyte_asn1.OBJECT_IDENTIFIER) {
+			break
+		}
+		policyOIDStr := oidString(policyOID)
+		policyNode.Children["policyIdentifier"] = node.New("policyIdentifier", policyOIDStr)
+
+		// Add policy by OID as well for direct access
+		n.Children[policyOIDStr] = policyNode
+
+		// Read policyQualifiers (OPTIONAL SEQUENCE)
+		if len(policy) > 0 {
+			qualifiersNode := node.New("policyQualifiers", nil)
+			var qualifiers cryptobyte.String
+			if policy.ReadASN1(&qualifiers, cryptobyte_asn1.SEQUENCE) {
+				qIdx := 0
+				for len(qualifiers) > 0 {
+					var qualifier cryptobyte.String
+					if !qualifiers.ReadASN1(&qualifier, cryptobyte_asn1.SEQUENCE) {
+						break
+					}
+
+					qNode := node.New(fmt.Sprintf("%d", qIdx), nil)
+
+					// Read policyQualifierId (OID)
+					var qOID cryptobyte.String
+					if !qualifier.ReadASN1(&qOID, cryptobyte_asn1.OBJECT_IDENTIFIER) {
+						break
+					}
+					qOIDStr := oidString(qOID)
+					qNode.Children["policyQualifierId"] = node.New("policyQualifierId", qOIDStr)
+
+					// Parse qualifier based on OID
+					if qOIDStr == idQtCps {
+						// CPS URI - IA5String
+						var cpsURI cryptobyte.String
+						if qualifier.ReadASN1(&cpsURI, cryptobyte_asn1.IA5String) {
+							uri := string(cpsURI)
+							qNode.Children["cpsURI"] = node.New("cpsURI", uri)
+							qNode.Children["type"] = node.New("type", "cps")
+							// Check encoding
+							qNode.Children["encoding"] = node.New("encoding", "ia5String")
+							// Extract scheme for convenience
+							if strings.Contains(uri, ":") {
+								scheme := strings.Split(uri, ":")[0]
+								qNode.Children["scheme"] = node.New("scheme", scheme)
+							}
+						}
+					} else if qOIDStr == idQtUnotice {
+						// UserNotice - SEQUENCE
+						qNode.Children["type"] = node.New("type", "userNotice")
+						var userNotice cryptobyte.String
+						if qualifier.ReadASN1(&userNotice, cryptobyte_asn1.SEQUENCE) {
+							unNode := node.New("userNotice", nil)
+							// Parse elements: noticeReference (SEQUENCE) first, then explicitText (string)
+							// If first element is not SEQUENCE, it's explicitText
+							for len(userNotice) > 0 {
+								var element cryptobyte.String
+								var elementTag cryptobyte_asn1.Tag
+								if !userNotice.ReadAnyASN1(&element, &elementTag) {
+									break
+								}
+
+								if elementTag == cryptobyte_asn1.SEQUENCE {
+									// noticeReference
+									nrNode := node.New("noticeReference", nil)
+									var org cryptobyte.String
+									var noticeNums cryptobyte.String
+									if element.ReadASN1(&org, cryptobyte_asn1.SEQUENCE) {
+										orgNode := node.New("organization", nil)
+										var orgStr cryptobyte.String
+										var orgTag cryptobyte_asn1.Tag
+										if org.ReadAnyASN1(&orgStr, &orgTag) {
+											orgNode.Children["value"] = node.New("value", string(orgStr))
+											orgNode.Children["encoding"] = node.New("encoding", asn1StringType(int(orgTag)))
+										}
+										nrNode.Children["organization"] = orgNode
+										if org.ReadASN1(&noticeNums, cryptobyte_asn1.SEQUENCE) {
+											numsNode := node.New("noticeNumbers", nil)
+											numIdx := 0
+											for len(noticeNums) > 0 {
+												var num int64
+												if noticeNums.ReadASN1Integer(&num) {
+													numsNode.Children[fmt.Sprintf("%d", numIdx)] = node.New(fmt.Sprintf("%d", numIdx), num)
+													numIdx++
+												} else {
+													break
+												}
+											}
+											numsNode.Children["count"] = node.New("count", numIdx)
+											nrNode.Children["noticeNumbers"] = numsNode
+										}
+									}
+									unNode.Children["noticeReference"] = nrNode
+								} else {
+									// explicitText - DisplayText (any string type)
+									etNode := node.New("explicitText", nil)
+									etNode.Children["value"] = node.New("value", string(element))
+									etNode.Children["encoding"] = node.New("encoding", asn1StringType(int(elementTag)))
+									etNode.Children["tag"] = node.New("tag", int(elementTag))
+									unNode.Children["explicitText"] = etNode
+								}
+							}
+							qNode.Children["userNotice"] = unNode
+						}
+					} else {
+						// Unknown qualifier type - store raw bytes
+						qNode.Children["type"] = node.New("type", "unknown")
+						var raw cryptobyte.String
+						var rawTag cryptobyte_asn1.Tag
+						if qualifier.ReadAnyASN1(&raw, &rawTag) {
+							qNode.Children["raw"] = node.New("raw", raw)
+						}
+					}
+
+					qualifiersNode.Children[fmt.Sprintf("%d", qIdx)] = qNode
+					// Also add by OID for direct access
+					qualifiersNode.Children[qOIDStr] = qNode
+					qIdx++
+				}
+				qualifiersNode.Children["count"] = node.New("count", qIdx)
+			}
+			policyNode.Children["policyQualifiers"] = qualifiersNode
+		}
+
+		policiesNode.Children[fmt.Sprintf("%d", idx)] = policyNode
+		idx++
+	}
+
+	return n
+}
+
+// asn1StringType returns the ASN.1 string type name for a tag number
+func asn1StringType(tag int) string {
+	switch tag {
+	case 12:
+		return "utf8String"
+	case 13:
+		return "printableString"
+	case 22:
+		return "ia5String"
+	case 20:
+		return "bmpString"
+	case 19:
+		return "visibleString"
+	case 26:
+		return "universalString"
+	default:
+		return "unknown"
+	}
+}
