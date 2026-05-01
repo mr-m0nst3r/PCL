@@ -186,9 +186,14 @@ func buildSignatureAlgorithm(cert *x509.Certificate) *node.Node {
 	if len(cert.SignatureAlgorithmOID) > 0 {
 		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
 	}
-	params := buildAlgorithmIDParams(ParseCertSignatureAlgorithmParams(cert.Raw))
-	if params != nil {
-		n.Children["parameters"] = params
+	params := ParseCertSignatureAlgorithmParams(cert.Raw)
+	// Add raw DER bytes for byte-for-byte encoding validation (Mozilla requirements)
+	if len(params.RawDER) > 0 {
+		n.Children["rawDER"] = node.New("rawDER", params.RawDER)
+	}
+	paramsNode := buildAlgorithmIDParams(params)
+	if paramsNode != nil {
+		n.Children["parameters"] = paramsNode
 	}
 	return n
 }
@@ -199,9 +204,14 @@ func buildTBSSignatureAlgorithm(cert *x509.Certificate) *node.Node {
 	if len(cert.SignatureAlgorithmOID) > 0 {
 		n.Children["oid"] = node.New("oid", cert.SignatureAlgorithmOID.String())
 	}
-	params := buildAlgorithmIDParams(ParseTBSCertSignatureParams(cert.RawTBSCertificate))
-	if params != nil {
-		n.Children["parameters"] = params
+	params := ParseTBSCertSignatureParams(cert.RawTBSCertificate)
+	// Add raw DER bytes for byte-for-byte encoding validation (Mozilla requirements)
+	if len(params.RawDER) > 0 {
+		n.Children["rawDER"] = node.New("rawDER", params.RawDER)
+	}
+	paramsNode := buildAlgorithmIDParams(params)
+	if paramsNode != nil {
+		n.Children["parameters"] = paramsNode
 	}
 	return n
 }
@@ -312,9 +322,14 @@ func buildSubjectPublicKeyInfo(cert *x509.Certificate) *node.Node {
 	if len(cert.PublicKeyAlgorithmOID) > 0 {
 		algo.Children["oid"] = node.New("oid", cert.PublicKeyAlgorithmOID.String())
 	}
-	params := buildAlgorithmIDParams(ParseSubjectPublicKeyInfoParams(cert.RawSubjectPublicKeyInfo))
-	if params != nil {
-		algo.Children["parameters"] = params
+	params := ParseSubjectPublicKeyInfoParams(cert.RawSubjectPublicKeyInfo)
+	// Add raw DER bytes for byte-for-byte encoding validation (Mozilla requirements)
+	if len(params.RawDER) > 0 {
+		algo.Children["rawDER"] = node.New("rawDER", params.RawDER)
+	}
+	paramsNode := buildAlgorithmIDParams(params)
+	if paramsNode != nil {
+		algo.Children["parameters"] = paramsNode
 	}
 	n.Children["algorithm"] = algo
 

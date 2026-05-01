@@ -26,6 +26,7 @@ func LoadCertificates(path string) ([]*Info, error) {
 			Cert:     r.Data,
 			FilePath: r.FilePath,
 			Hash:     r.Hash,
+			Source:   "local",
 		}
 	}
 	return infos, nil

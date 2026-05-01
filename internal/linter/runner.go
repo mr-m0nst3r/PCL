@@ -175,6 +175,12 @@ func Run(cfg Config, w io.Writer) error {
 		for _, c := range chain {
 			tree := certzcrypto.BuildTree(c.Cert)
 
+			// Add download format to tree for PEM format detection rule
+			if c.DownloadFormat != "" {
+				tree.Children["downloadFormat"] = node.New("downloadFormat", c.DownloadFormat)
+				tree.Children["downloadURL"] = node.New("downloadURL", c.DownloadURL)
+			}
+
 			// Add CRL node to tree if CRLs are present
 			if len(crls) > 0 {
 				for _, crlInfo := range crls {
@@ -214,20 +220,97 @@ func Run(cfg Config, w io.Writer) error {
 					continue
 				}
 
+				// Create synthetic cert.Info for OCSP response to set proper CertType
+				ocspCertInfo := &cert.Info{
+					FilePath: ocspInfo.FilePath,
+					Type:     "ocsp",
+					Source:   ocspInfo.Source,
+				}
+
 				tree := ocspNode
 				ctxOpts := []operator.ContextOption{operator.WithOCSPs(ocsps)}
-				ctx := operator.NewEvaluationContext(tree, nil, chain, ctxOpts...)
+				ctx := operator.NewEvaluationContext(tree, ocspCertInfo, chain, ctxOpts...)
 
 				filteredPolicies := filterPoliciesByInput(policies, AppliesToOCSP)
 				for _, p := range filteredPolicies {
 					res := policy.Evaluate(p, tree, reg, ctx)
 					results = append(results, res)
 				}
+
+				// Evaluate OCSP signing certificate if present in response
+				if ocspInfo.Response.Certificate != nil {
+					// Convert standard cert to zcrypto cert
+					zcryptoSignerCert, err := zcrypto.FromStdCert(ocspInfo.Response.Certificate)
+					if err != nil || zcryptoSignerCert == nil {
+						continue
+					}
+					ocspSignerTree := certzcrypto.BuildTree(zcryptoSignerCert)
+					ocspSignerInfo := &cert.Info{
+						Cert:     zcryptoSignerCert,
+						FilePath: ocspInfo.FilePath + " (signing cert)",
+						Type:     "ocspSigning",
+						Source:   "extracted from OCSP response",
+					}
+
+					signerCtxOpts := []operator.ContextOption{operator.WithOCSPs(ocsps)}
+					signerCtx := operator.NewEvaluationContext(ocspSignerTree, ocspSignerInfo, chain, signerCtxOpts...)
+
+					signerPolicies := filterPoliciesByCert(policies, zcryptoSignerCert)
+					for _, p := range signerPolicies {
+						res := policy.Evaluate(p, ocspSignerTree, reg, signerCtx)
+						results = append(results, res)
+					}
+				}
 			}
 		}
+
+			// Evaluate CRLs independently if CRLs were fetched (dual evaluation)
+			// This evaluates CRL-specific rules (like signature algorithm params)
+			// separately from certificate context
+			if len(crls) > 0 {
+				for _, crlInfo := range crls {
+					if crlInfo.CRL == nil {
+						continue
+					}
+
+					// Build issuer certificates list from chain
+					var issuerCerts []*x509.Certificate
+					for _, c := range chain {
+						if c.Cert != nil {
+							issuerCerts = append(issuerCerts, c.Cert)
+						}
+					}
+
+					crlNode := crlzcrypto.BuildTreeWithChain(crlInfo.CRL, issuerCerts)
+					if crlNode == nil {
+						continue
+					}
+
+					// Create synthetic cert.Info for CRL to set proper CertType
+					crlCertInfo := &cert.Info{
+						FilePath: crlInfo.FilePath,
+						Type:     "crl",
+						Source:   crlInfo.Source,
+					}
+
+					tree := crlNode
+					ctxOpts := []operator.ContextOption{operator.WithCRLs(crls)}
+					ctx := operator.NewEvaluationContext(tree, crlCertInfo, chain, ctxOpts...)
+
+					// Filter policies by CRL type
+					hasDelta := hasDeltaCRLIndicator(crlInfo.CRL)
+					isIndirect := isIndirectCRL(crlInfo.CRL)
+					filteredPolicies := filterPoliciesByCRL(policies, hasDelta, isIndirect)
+					for _, p := range filteredPolicies {
+						res := policy.Evaluate(p, tree, reg, ctx)
+						results = append(results, res)
+					}
+				}
+			}
 	} else if len(crls) > 0 {
 		// Process CRLs independently when no certificates provided
 		// Use issuers as chain for CRL signature verification
+		// Also evaluate CRLs in auto-validate mode (dual evaluation)
 		for _, crlInfo := range crls {
 			if crlInfo.CRL == nil {
 				continue
@@ -246,11 +329,18 @@ func Run(cfg Config, w io.Writer) error {
 				continue
 			}
 
+			// Create synthetic cert.Info for CRL to set proper CertType
+			crlCertInfo := &cert.Info{
+				FilePath: crlInfo.FilePath,
+				Type:     "crl",
+				Source:   crlInfo.Source,
+			}
+
 			// Create a minimal tree with just the CRL
 			tree := crlNode
 
 			ctxOpts := []operator.ContextOption{operator.WithCRLs(crls)}
-			ctx := operator.NewEvaluationContext(tree, nil, issuers, ctxOpts...)
+			ctx := operator.NewEvaluationContext(tree, crlCertInfo, issuers, ctxOpts...)
 
 			// Filter policies by CRL type
 			hasDelta := hasDeltaCRLIndicator(crlInfo.CRL)
@@ -273,17 +363,49 @@ func Run(cfg Config, w io.Writer) error {
 				continue
 			}
 
+			// Create synthetic cert.Info for OCSP response to set proper CertType
+			ocspCertInfo := &cert.Info{
+				FilePath: ocspInfo.FilePath,
+				Type:     "ocsp",
+				Source:   ocspInfo.Source,
+			}
+
 			// Use OCSP node directly as tree root
 			tree := ocspNode
 
 			ctxOpts := []operator.ContextOption{operator.WithOCSPs(ocsps)}
-			ctx := operator.NewEvaluationContext(tree, nil, nil, ctxOpts...)
+			ctx := operator.NewEvaluationContext(tree, ocspCertInfo, nil, ctxOpts...)
 
 			// Filter policies by input type (OCSP)
 			filteredPolicies := filterPoliciesByInput(policies, AppliesToOCSP)
 			for _, p := range filteredPolicies {
 				res := policy.Evaluate(p, tree, reg, ctx)
 				results = append(results, res)
+			}
+
+			// Evaluate OCSP signing certificate if present in response
+			if ocspInfo.Response.Certificate != nil {
+				// Convert standard cert to zcrypto cert
+				zcryptoSignerCert, err := zcrypto.FromStdCert(ocspInfo.Response.Certificate)
+				if err != nil || zcryptoSignerCert == nil {
+					continue
+				}
+				ocspSignerTree := certzcrypto.BuildTree(zcryptoSignerCert)
+				ocspSignerInfo := &cert.Info{
+					Cert:     zcryptoSignerCert,
+					FilePath: ocspInfo.FilePath + " (signing cert)",
+					Type:     "ocspSigning",
+					Source:   "extracted from OCSP response",
+				}
+
+				signerCtxOpts := []operator.ContextOption{operator.WithOCSPs(ocsps)}
+				signerCtx := operator.NewEvaluationContext(ocspSignerTree, ocspSignerInfo, nil, signerCtxOpts...)
+
+				signerPolicies := filterPoliciesByCert(policies, zcryptoSignerCert)
+				for _, p := range signerPolicies {
+					res := policy.Evaluate(p, ocspSignerTree, reg, signerCtx)
+					results = append(results, res)
+				}
 			}
 		}
 	} else {
@@ -432,6 +554,7 @@ func fetchAutoOCSP(chain []*cert.Info, timeout time.Duration, nonceOpts *ocsp.No
 	info := &ocsp.Info{
 		Response: fetchResult.Response,
 		FilePath: url, // Use URL as "file path" for auto-fetched responses
+		Source:   "downloaded",
 	}
 
 	// Populate request debug info
@@ -541,11 +664,26 @@ func climbChain(chain []*cert.Info, timeout time.Duration, maxDepth int, w io.Wr
 		}
 
 		// Add issuer to chain
+		var source string
+		switch pkcs7Result.Format {
+		case aia.FormatPKCS7:
+			source = "extracted from PKCS#7"
+		case aia.FormatDER:
+			source = "downloaded"
+		case aia.FormatPEM:
+			source = "downloaded PEM"
+			fmt.Fprintf(w, "Warning: CA Issuers URL %s returned PEM format (RFC 5280 requires DER/BER)\n", url)
+		default:
+			source = "downloaded"
+		}
 		issuerInfo := &cert.Info{
-			Cert:     issuerCert,
-			FilePath: url,
-			Type:     cert.GetCertType(issuerCert, len(result), len(result)+1),
-			Position: len(result),
+			Cert:           issuerCert,
+			FilePath:       url,
+			Type:           cert.GetCertType(issuerCert, len(result), len(result)+1),
+			Position:       len(result),
+			Source:         source,
+			DownloadURL:    url,
+			DownloadFormat: string(pkcs7Result.Format),
 		}
 		result = append(result, issuerInfo)
 
@@ -580,6 +718,7 @@ func fetchAutoCRL(chain []*cert.Info, timeout time.Duration, w io.Writer) []*crl
 			results = append(results, &crl.Info{
 				CRL:      fetchResult.CRL,
 				FilePath: url,
+				Source:   "downloaded",
 			})
 		}
 	}

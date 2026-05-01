@@ -55,13 +55,19 @@ func (f *TextFormatter) Format(w io.Writer, out LintOutput) error {
 		if certPath == "" {
 			certPath = "-"
 		}
+		// Display source info if available and not local file
+		sourceInfo := ""
+		if pr.Source != "" && pr.Source != "local" {
+			sourceInfo = fmt.Sprintf(" (%s)", pr.Source)
+		}
 		passCount, failCount, skipCount, warnCount := countsFromResult(pr)
 		if _, err := fmt.Fprintf(
 			w,
-			"[File] Policy: %s | Cert: %s | File: %s | Verdict: %s | %s: %d, %s: %d, %s: %d, %s: %d\n",
+			"[File] Policy: %s | Cert: %s | File: %s%s | Verdict: %s | %s: %d, %s: %d, %s: %d, %s: %d\n",
 			pr.PolicyID,
 			pr.CertType,
 			certPath,
+			sourceInfo,
 			verdictLabelColored(pr.Verdict),
 			verdictLabelColored(rule.VerdictPass),
 			passCount,

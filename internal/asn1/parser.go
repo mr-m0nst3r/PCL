@@ -11,6 +11,7 @@ type ParamsState struct {
 	IsAbsent   bool   // parameters field is absent
 	OID        string // algorithm OID
 	NamedCurve string // namedCurve OID for ECDSA (from parameters field)
+	RawDER     []byte // raw DER bytes of the entire AlgorithmIdentifier SEQUENCE
 
 	// RSASSA-PSS parameters (OID 1.2.840.113549.1.1.10)
 	PSS *PSSParams
@@ -51,6 +52,8 @@ type AlgorithmIdentifier struct {
 // and returns the parameters state and OID.
 func ParseAlgorithmIDParams(derBytes []byte) ParamsState {
 	result := ParamsState{}
+	// Store raw DER bytes for byte-for-byte encoding validation (Mozilla requirements)
+	result.RawDER = derBytes
 
 	input := cryptobyte.String(derBytes)
 

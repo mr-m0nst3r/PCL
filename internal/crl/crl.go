@@ -16,6 +16,7 @@ type Info struct {
 	CRL      *x509.RevocationList
 	FilePath string
 	Hash     string
+	Source   string // Source description: "local", "downloaded", etc.
 }
 
 func ParseCRL(data []byte) (*x509.RevocationList, error) {

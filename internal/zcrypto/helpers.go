@@ -16,6 +16,7 @@ var extensionNames = map[string]string{
 	"2.5.29.17":          "subjectAltName",
 	"2.5.29.18":          "issuerAltName",
 	"2.5.29.19":          "basicConstraints",
+	"2.5.29.30":          "nameConstraints",
 	"2.5.29.31":          "cRLDistributionPoints",
 	"2.5.29.32":          "certificatePolicies",
 	"2.5.29.35":          "authorityKeyIdentifier",

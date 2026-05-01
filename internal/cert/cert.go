@@ -12,11 +12,14 @@ import (
 var extensions = []string{".pem", ".der", ".crt", ".cer"}
 
 type Info struct {
-	Cert     *x509.Certificate
-	FilePath string
-	Hash     string
-	Position int
-	Type     string
+	Cert         *x509.Certificate
+	FilePath     string
+	Hash         string
+	Position     int
+	Type         string
+	Source       string // Source description: "local", "downloaded", "extracted from PKCS#7", etc.
+	DownloadURL  string // URL if certificate was downloaded via CA Issuers
+	DownloadFormat string // Format of download: "DER", "PKCS7", "PEM" (PEM is not RFC compliant)
 }
 
 func ParseCertificate(data []byte) (*x509.Certificate, error) {

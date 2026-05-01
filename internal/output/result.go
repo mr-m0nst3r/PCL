@@ -72,6 +72,7 @@ func FilterRules(output LintOutput, opts Options) LintOutput {
 			PolicyID:  pr.PolicyID,
 			CertType:  pr.CertType,
 			CertPath:  pr.CertPath,
+			Source:    pr.Source,
 			Verdict:   pr.Verdict,
 			CheckedAt: pr.CheckedAt,
 			Counts:    pr.Counts,

@@ -16,6 +16,7 @@ type Info struct {
 	Response *ocsp.Response
 	FilePath string
 	Hash     string
+	Source   string // Source description: "local", "downloaded", etc.
 
 	// Request debug info (populated when auto-fetching)
 	RequestNonce       []byte // Nonce sent in request

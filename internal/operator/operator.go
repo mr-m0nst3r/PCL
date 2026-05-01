@@ -102,4 +102,6 @@ var All = []Operator{
 	IsUTF8String{},
 	ValidIA5String{},
 	ValidPrintableString{},
+	// DER encoding validation (Mozilla byte-for-byte requirements)
+	DEREqualsHex{},
 }
