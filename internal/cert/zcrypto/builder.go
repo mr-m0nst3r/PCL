@@ -168,6 +168,11 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 			policyNode := node.New(fmt.Sprintf("%d", i), nil)
 			policyNode.Children["oid"] = node.New("oid", oid.String())
 			policiesNode.Children[oid.String()] = policyNode
+			// Add friendly name for known policy OIDs
+			friendlyName := policyFriendlyName(oid.String())
+			if friendlyName != "" {
+				policiesNode.Children[friendlyName] = policyNode
+			}
 		}
 		root.Children["certificatePolicies"] = policiesNode
 	}
