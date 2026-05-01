@@ -447,3 +447,36 @@ func TestBuilder_CRLDPStructure(t *testing.T) {
 		t.Logf("Scheme: %v", scheme.Value)
 	}
 }
+
+func TestBuilder_NameConstraints(t *testing.T) {
+	root := loadCert(t, "nc_ca.pem")
+
+	// Check nameConstraints node exists
+	assertPathExists(t, root, "certificate.nameConstraints")
+
+	// Check critical flag
+	assertPathValue(t, root, "certificate.nameConstraints.critical", true)
+
+	// Check permittedSubtrees exists
+	assertPathExists(t, root, "certificate.nameConstraints.permittedSubtrees")
+
+	// Check permittedSubtrees.dNSName exists
+	assertPathExists(t, root, "certificate.nameConstraints.permittedSubtrees.dNSName")
+
+	// Check first DNS constraint value
+	dns0, ok := root.Resolve("certificate.nameConstraints.permittedSubtrees.dNSName.0")
+	if !ok {
+		t.Fatal("DNS constraint 0 not found")
+	}
+	if dns0.Children["value"] == nil {
+		t.Error("DNS constraint should have value")
+	}
+	t.Logf("DNS constraint 0 value: %v", dns0.Children["value"].Value)
+
+	// Check permittedSubtrees.iPAddress exists
+	assertPathExists(t, root, "certificate.nameConstraints.permittedSubtrees.iPAddress")
+
+	// Check min/max are NOT present (BR requirement)
+	assertPathNotExists(t, root, "certificate.nameConstraints.permittedSubtrees.dNSName.0.min")
+	assertPathNotExists(t, root, "certificate.nameConstraints.permittedSubtrees.dNSName.0.max")
+}

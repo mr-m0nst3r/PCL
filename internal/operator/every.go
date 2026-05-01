@@ -212,6 +212,10 @@ func resolvePath(n *node.Node, path string) *node.Node {
 					virtualNode.Children[fmt.Sprintf("%d", len(virtualNode.Children))] = child
 				}
 			}
+			// Return nil if virtualNode has no children (nothing matched the wildcard)
+			if len(virtualNode.Children) == 0 {
+				return nil
+			}
 			return virtualNode
 		}
 
