@@ -49,6 +49,12 @@ func GetCertType(cert *x509.Certificate, position, chainLen int) string {
 			}
 			return "intermediate"
 		}
+		// Check for ocspSigning EKU before returning "leaf"
+		for _, eku := range cert.ExtKeyUsage {
+			if eku == x509.ExtKeyUsageOcspSigning {
+				return "ocspSigning"
+			}
+		}
 		return "leaf"
 	}
 	// At other positions, check if it's root or intermediate
