@@ -398,7 +398,15 @@ func ParseCertPolicies(extValue []byte) *node.Node {
 		policyOIDStr := oidString(policyOID)
 		policyNode.Children["policyIdentifier"] = node.New("policyIdentifier", policyOIDStr)
 
-		// Add policy by OID as well for direct access
+		// Add friendly name for known policy OIDs
+		friendlyName := policyFriendlyName(policyOIDStr)
+		if friendlyName != "" {
+			policyNode.Children["name"] = node.New("name", friendlyName)
+			// Add policy by friendly name for direct access
+			n.Children[friendlyName] = policyNode
+		}
+
+		// Add policy by OID as well for direct access (compatibility)
 		n.Children[policyOIDStr] = policyNode
 
 		// Read policyQualifiers (OPTIONAL SEQUENCE)
@@ -540,5 +548,48 @@ func asn1StringType(tag int) string {
 		return "universalString"
 	default:
 		return "unknown"
+	}
+}
+
+// policyFriendlyName returns friendly name for known certificate policy OIDs
+func policyFriendlyName(oid string) string {
+	switch oid {
+	// TLS/SSL Server Certificate Policies
+	case "2.23.140.1.2.1":
+		return "dvPolicy"
+	case "2.23.140.1.2.2":
+		return "ovPolicy"
+	case "2.23.140.1.2.3":
+		return "ivPolicy"
+	case "2.23.140.1.1":
+		return "evPolicy"
+	case "2.5.29.32.0":
+		return "anyPolicy"
+	// Code Signing Policies
+	case "2.23.140.1.4.1":
+		return "codeSigningPolicy"
+	// SMIME Policies - Mailbox-validated
+	case "2.23.140.1.5.1.1":
+		return "smimeMailboxLegacy"
+	case "2.23.140.1.5.1.2":
+		return "smimeMailboxMultipurpose"
+	case "2.23.140.1.5.1.3":
+		return "smimeMailboxStrict"
+	// SMIME Policies - Organization-validated
+	case "2.23.140.1.5.2.1":
+		return "smimeOrgLegacy"
+	case "2.23.140.1.5.2.2":
+		return "smimeOrgMultipurpose"
+	case "2.23.140.1.5.2.3":
+		return "smimeOrgStrict"
+	// SMIME Policies - Sponsor-validated
+	case "2.23.140.1.5.3.1":
+		return "smimeSponsorLegacy"
+	case "2.23.140.1.5.3.2":
+		return "smimeSponsorMultipurpose"
+	case "2.23.140.1.5.3.3":
+		return "smimeSponsorStrict"
+	default:
+		return ""
 	}
 }
