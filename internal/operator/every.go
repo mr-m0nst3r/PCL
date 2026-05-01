@@ -8,18 +8,26 @@ import (
 
 // Every checks that every element in an array-like node satisfies a condition.
 // Operands format (map):
-//   - path: sub-path relative to each element (optional, empty means check element itself)
-//   - check: operator name to apply to each element
-//   - values: operands for the check operator (optional)
+//   - path: sub-path relative to each element (supports `*` wildcard for nested arrays)
+//   - operator: operator name to apply to each element (reuses top-level operator concept)
+//   - operands: operands for the inner operator (optional)
 //   - skipMissing: if true, skip elements where path doesn't exist (default: false)
 //
-// Example YAML usage:
+// Example YAML usage for simple check:
 //   target: crl.revokedCertificates
 //   operator: every
 //   operands:
 //     path: extensions.2.5.29.21.value
-//     check: in
-//     values: [1, 3, 4, 5, 9]
+//     operator: in
+//     operands: [1, 3, 4, 5, 9]
+//
+// Example YAML usage with wildcard for nested arrays:
+//   target: certificate.extensions.cRLDistributionPoints.distributionPoints
+//   operator: every
+//   operands:
+//     path: "*.distributionPoint.fullName.generalNames.*.scheme"
+//     operator: eq
+//     operands: ["http"]
 type Every struct{}
 
 func (Every) Name() string { return "every" }
@@ -34,57 +42,69 @@ func (Every) Evaluate(n *node.Node, ctx *EvaluationContext, operands []any) (boo
 		return false, fmt.Errorf("every operator requires operands")
 	}
 
-	// Operands can be a map or we parse from slice
 	var subPath string
-	var checkOp string
-	var checkOperands []any
+	var innerOp string
+	var innerOperands []any
 	var skipMissing bool
 
-	// Try parsing as map first
 	if m, ok := operands[0].(map[string]any); ok {
 		if p, ok := m["path"].(string); ok {
 			subPath = p
 		}
-		if c, ok := m["check"].(string); ok {
-			checkOp = c
+		// Use "operator" for inner operator (consistent naming)
+		if op, ok := m["operator"].(string); ok {
+			innerOp = op
 		}
-		if v, ok := m["values"]; ok {
-			if slice, ok := v.([]any); ok {
-				checkOperands = slice
-			} else {
-				checkOperands = []any{v}
+		// Also support legacy "check" for backwards compatibility
+		if c, ok := m["check"].(string); ok && innerOp == "" {
+			innerOp = c
+		}
+		if v, ok := m["operands"]; ok {
+			switch val := v.(type) {
+			case []any:
+				innerOperands = val
+			case map[string]any:
+				innerOperands = []any{val}
+			default:
+				innerOperands = []any{val}
+			}
+		}
+		// Also support legacy "values" for backwards compatibility
+		if vs, ok := m["values"]; ok && len(innerOperands) == 0 {
+			switch val := vs.(type) {
+			case []any:
+				innerOperands = val
+			default:
+				innerOperands = []any{val}
 			}
 		}
 		if s, ok := m["skipMissing"].(bool); ok {
 			skipMissing = s
 		}
-	} else {
-		// Alternative: parse as [path, check, values...]
-		if len(operands) >= 2 {
-			if p, ok := operands[0].(string); ok {
-				subPath = p
-			}
-			if c, ok := operands[1].(string); ok {
-				checkOp = c
-			}
-			if len(operands) > 2 {
-				checkOperands = operands[2:]
-			}
+	} else if len(operands) >= 2 {
+		// Alternative: parse as [path, operator, operands...]
+		if p, ok := operands[0].(string); ok {
+			subPath = p
+		}
+		if op, ok := operands[1].(string); ok {
+			innerOp = op
+		}
+		if len(operands) > 2 {
+			innerOperands = operands[2:]
 		}
 	}
 
-	if checkOp == "" {
-		return false, fmt.Errorf("every operator requires 'check' operand")
+	if innerOp == "" {
+		return false, fmt.Errorf("every operator requires 'operator' operand")
 	}
 
-	// Get the check operator from registry
 	registry := DefaultRegistry()
-	op, err := registry.Get(checkOp)
+	op, err := registry.Get(innerOp)
 	if err != nil {
-		return false, fmt.Errorf("every: unknown check operator '%s'", checkOp)
+		return false, fmt.Errorf("every: unknown operator '%s'", innerOp)
 	}
 
-	// If node has no children (empty array), trivially true
+	// If node has no children, trivially true
 	if len(n.Children) == 0 {
 		return true, nil
 	}
@@ -95,7 +115,6 @@ func (Every) Evaluate(n *node.Node, ctx *EvaluationContext, operands []any) (boo
 			continue
 		}
 
-		// Resolve sub-path if provided
 		var targetNode *node.Node
 		if subPath == "" {
 			targetNode = child
@@ -103,19 +122,34 @@ func (Every) Evaluate(n *node.Node, ctx *EvaluationContext, operands []any) (boo
 			targetNode = resolvePath(child, subPath)
 			if targetNode == nil {
 				if skipMissing {
-					continue // Skip this element
+					continue
 				}
-				return false, nil // Element doesn't have required path
+				return false, nil
 			}
 		}
 
-		// Apply check operator
-		result, err := op.Evaluate(targetNode, ctx, checkOperands)
-		if err != nil {
-			return false, err
-		}
-		if !result {
-			return false, nil // At least one element failed
+		// If target is a virtual node (from wildcard), check all its children
+		if targetNode.Name == "*" && len(targetNode.Children) > 0 {
+			for _, subChild := range targetNode.Children {
+				if subChild == nil {
+					continue
+				}
+				result, err := op.Evaluate(subChild, ctx, innerOperands)
+				if err != nil {
+					return false, err
+				}
+				if !result {
+					return false, nil
+				}
+			}
+		} else {
+			result, err := op.Evaluate(targetNode, ctx, innerOperands)
+			if err != nil {
+				return false, err
+			}
+			if !result {
+				return false, nil
+			}
 		}
 	}
 
@@ -124,6 +158,7 @@ func (Every) Evaluate(n *node.Node, ctx *EvaluationContext, operands []any) (boo
 
 // resolvePath resolves a dot-separated path from a node.
 // Handles OID-style keys that contain dots (e.g., "2.5.29.21").
+// Supports `*` wildcard to match all children at that level.
 func resolvePath(n *node.Node, path string) *node.Node {
 	if n == nil || path == "" {
 		return n
@@ -137,8 +172,50 @@ func resolvePath(n *node.Node, path string) *node.Node {
 			return nil
 		}
 
-		// Try to find child with exact match
 		part := parts[i]
+
+		// Handle wildcard: collect all children and continue matching
+		if part == "*" {
+			virtualNode := node.New("*", nil)
+			for _, child := range current.Children {
+				if child == nil {
+					continue
+				}
+				// Build remaining path
+				if i+1 < len(parts) {
+					remainingPath := combineParts(parts, i+1, len(parts))
+					// If the child's name matches the next path segment,
+					// skip that segment when resolving from the child
+					remainingParts := splitPath(remainingPath)
+					if len(remainingParts) > 0 && child.Name == remainingParts[0] {
+						// Skip the matching segment
+						if len(remainingParts) > 1 {
+							remainingPath = combineParts(remainingParts, 1, len(remainingParts))
+						} else {
+							remainingPath = ""
+						}
+					}
+					result := resolvePath(child, remainingPath)
+					if result != nil {
+						// Merge results into virtual node
+						if len(result.Children) > 0 {
+							for _, v := range result.Children {
+								virtualNode.Children[fmt.Sprintf("%d", len(virtualNode.Children))] = v
+							}
+						} else {
+							// Single value result
+							virtualNode.Children[fmt.Sprintf("%d", len(virtualNode.Children))] = result
+						}
+					}
+				} else {
+					// * is the last part, add all children directly
+					virtualNode.Children[fmt.Sprintf("%d", len(virtualNode.Children))] = child
+				}
+			}
+			return virtualNode
+		}
+
+		// Try to find child with exact match
 		next := current.Children[part]
 
 		// If not found and part looks like OID start (numeric),

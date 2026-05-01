@@ -48,6 +48,10 @@ func ParseAIA(extValue []byte) *node.Node {
 
 	n.Children["empty"] = node.New("empty", false)
 
+	// Track OCSP and CA Issuers presence
+	hasOCSP := false
+	hasCaIssuers := false
+
 	idx := 0
 	for len(ads) > 0 {
 		var ad cryptobyte.String
@@ -65,6 +69,14 @@ func ParseAIA(extValue []byte) *node.Node {
 		methodOID := oidString(accessMethod)
 		adNode.Children["accessMethod"] = node.New("accessMethod", methodOID)
 
+		// Track OCSP and CA Issuers
+		if methodOID == "1.3.6.1.5.5.7.48.1" { // id-ad-ocsp
+			hasOCSP = true
+		}
+		if methodOID == "1.3.6.1.5.5.7.48.2" { // id-ad-caIssuers
+			hasCaIssuers = true
+		}
+
 		// Read accessLocation (GeneralName - context-specific tagged)
 		var location cryptobyte.String
 		var locationTag cryptobyte_asn1.Tag
@@ -74,8 +86,7 @@ func ParseAIA(extValue []byte) *node.Node {
 
 		locationNode := node.New("accessLocation", nil)
 		contextTag := int(locationTag & 0x1F)
-		locationType := generalNameType(contextTag)
-		locationNode.Children["type"] = node.New("type", locationType)
+		locationNode.Children["type"] = node.New("type", generalNameType(contextTag))
 		locationNode.Children["tag"] = node.New("tag", contextTag)
 
 		// For URI (tag 6), extract the URI string
@@ -106,23 +117,6 @@ func ParseAIA(extValue []byte) *node.Node {
 	}
 
 	n.Children["count"] = node.New("count", idx)
-
-	// Convenience: check if contains OCSP and/or CA Issuers
-	hasOCSP := false
-	hasCaIssuers := false
-	for i := 0; i < idx; i++ {
-		if adNode, ok := accessDescriptionsNode.Children[fmt.Sprintf("%d", i)]; ok {
-			if methodNode, ok := adNode.Children["accessMethod"]; ok {
-				method := methodNode.Value.(string)
-				if method == "1.3.6.1.5.5.7.48.1" { // id-ad-ocsp
-					hasOCSP = true
-				}
-				if method == "1.3.6.1.5.5.7.48.2" { // id-ad-caIssuers
-					hasCaIssuers = true
-				}
-			}
-		}
-	}
 	n.Children["containsOCSP"] = node.New("containsOCSP", hasOCSP)
 	n.Children["containsCaIssuers"] = node.New("containsCaIssuers", hasCaIssuers)
 

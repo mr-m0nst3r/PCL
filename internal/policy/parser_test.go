@@ -414,11 +414,15 @@ rules:
 	}
 
 	operands := p.Rules[0].Operands
-	if len(operands) != 2 {
-		t.Fatalf("expected 2 operands, got %d: %v", len(operands), operands)
+	operandsSlice, ok := operands.([]any)
+	if !ok {
+		t.Fatalf("expected operands to be []any, got %T", operands)
+	}
+	if len(operandsSlice) != 2 {
+		t.Fatalf("expected 2 operands, got %d: %v", len(operandsSlice), operandsSlice)
 	}
 
-	if operands[0] != "SHA256-RSA" {
-		t.Errorf("expected operand[0] to be 'SHA256-RSA', got %v (type %T)", operands[0], operands[0])
+	if operandsSlice[0] != "SHA256-RSA" {
+		t.Errorf("expected operand[0] to be 'SHA256-RSA', got %v (type %T)", operandsSlice[0], operandsSlice[0])
 	}
 }

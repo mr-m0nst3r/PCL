@@ -1,6 +1,7 @@
 package zcrypto
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -266,5 +267,183 @@ func TestBuilder_ExtensionDetails(t *testing.T) {
 		if _, ok := ext.Children["value"]; !ok {
 			t.Errorf("extension %s missing value", ext.Name)
 		}
+	}
+}
+
+func TestBuilder_AIAStructure(t *testing.T) {
+	data, err := os.ReadFile("../../../tests/certs/letsencrypt.pem")
+	if err != nil {
+		t.Fatalf("failed to read cert: %v", err)
+	}
+	loader := NewLoader()
+	cert, err := loader.Load(data)
+	if err != nil {
+		t.Fatalf("failed to load cert: %v", err)
+	}
+
+	node := BuildTree(cert)
+
+	exts := node.Children["extensions"]
+	if exts == nil {
+		t.Fatal("no extensions")
+	}
+
+	// Check AIA friendly name exists
+	aia, ok := exts.Children["authorityInfoAccess"]
+	if !ok {
+		t.Fatal("authorityInfoAccess friendly name not found")
+	}
+
+	// Check AIA OID exists
+	aiaOID, ok := exts.Children["1.3.6.1.5.5.7.1.1"]
+	if !ok {
+		t.Fatal("AIA OID not found")
+	}
+
+	// Should point to same node
+	if aia != aiaOID {
+		t.Error("friendly name and OID should point to same node")
+	}
+
+	// Check parsed accessDescriptions exist
+	ads, ok := aia.Children["accessDescriptions"]
+	if !ok {
+		t.Fatal("accessDescriptions not found")
+	}
+
+	// Check count
+	count, ok := aia.Children["count"]
+	if !ok {
+		t.Fatal("count not found")
+	}
+	t.Logf("AIA count: %v", count.Value)
+
+	// Check first accessDescription
+	ad0, ok := ads.Children["0"]
+	if !ok {
+		t.Fatal("first accessDescription not found")
+	}
+
+	method, ok := ad0.Children["accessMethod"]
+	if !ok {
+		t.Fatal("accessMethod not found")
+	}
+	t.Logf("First accessMethod: %v", method.Value)
+
+	loc, ok := ad0.Children["accessLocation"]
+	if !ok {
+		t.Fatal("accessLocation not found")
+	}
+	locType, ok := loc.Children["type"]
+	if !ok {
+		t.Fatal("accessLocation type not found")
+	}
+	t.Logf("accessLocation type: %v", locType.Value)
+	locTag, ok := loc.Children["tag"]
+	if !ok {
+		t.Fatal("accessLocation tag not found")
+	}
+	if locTag.Value.(int) != 6 {
+		t.Errorf("expected URI tag 6, got %v", locTag.Value)
+	}
+
+	// Check containsOCSP and containsCaIssuers
+	hasOCSP, ok := aia.Children["containsOCSP"]
+	if ok {
+		t.Logf("containsOCSP: %v", hasOCSP.Value)
+	}
+	hasCaIssuers, ok := aia.Children["containsCaIssuers"]
+	if ok {
+		t.Logf("containsCaIssuers: %v", hasCaIssuers.Value)
+	}
+}
+
+func TestBuilder_CRLDPStructure(t *testing.T) {
+	data, err := os.ReadFile("../../../tests/certs/letsencrypt.pem")
+	if err != nil {
+		t.Fatalf("failed to read cert: %v", err)
+	}
+	loader := NewLoader()
+	cert, err := loader.Load(data)
+	if err != nil {
+		t.Fatalf("failed to load cert: %v", err)
+	}
+
+	node := BuildTree(cert)
+
+	exts := node.Children["extensions"]
+	if exts == nil {
+		t.Fatal("no extensions")
+	}
+
+	// Check CRL DP friendly name exists
+	crlDP, ok := exts.Children["cRLDistributionPoints"]
+	if !ok {
+		t.Fatal("cRLDistributionPoints friendly name not found")
+	}
+
+	// Check CRL DP OID exists
+	crlDPOID, ok := exts.Children["2.5.29.31"]
+	if !ok {
+		t.Fatal("CRL DP OID not found")
+	}
+
+	// Should point to same node
+	if crlDP != crlDPOID {
+		t.Error("friendly name and OID should point to same node")
+	}
+
+	// Check parsed distributionPoints exist
+	dps, ok := crlDP.Children["distributionPoints"]
+	if !ok {
+		t.Fatal("distributionPoints not found")
+	}
+
+	// Check first distributionPoint
+	dp0, ok := dps.Children["0"]
+	if !ok {
+		t.Fatal("first distributionPoint not found")
+	}
+
+	// Check hasReasons and hasCRLIssuer
+	hasReasons, ok := dp0.Children["hasReasons"]
+	if ok {
+		t.Logf("hasReasons: %v", hasReasons.Value)
+		if hasReasons.Value.(bool) {
+			t.Error("should not have reasons field for Let's Encrypt cert")
+		}
+	}
+	hasCRLIssuer, ok := dp0.Children["hasCRLIssuer"]
+	if ok {
+		t.Logf("hasCRLIssuer: %v", hasCRLIssuer.Value)
+		if hasCRLIssuer.Value.(bool) {
+			t.Error("should not have cRLIssuer field for Let's Encrypt cert")
+		}
+	}
+
+	// Check distributionPoint fullName
+	dp, ok := dp0.Children["distributionPoint"]
+	if !ok {
+		t.Fatal("distributionPoint not found")
+	}
+	fullName, ok := dp.Children["fullName"]
+	if !ok {
+		t.Fatal("fullName not found")
+	}
+	gn0, ok := fullName.Children["generalNames"].Children["0"]
+	if !ok {
+		t.Fatal("first generalName not found")
+	}
+	gnType, ok := gn0.Children["type"]
+	if !ok {
+		t.Fatal("generalName type not found")
+	}
+	t.Logf("GeneralName type: %v", gnType.Value)
+	if gnType.Value.(string) != "uniformResourceIdentifier" {
+		t.Errorf("expected URI type, got %v", gnType.Value)
+	}
+	scheme, ok := gn0.Children["scheme"]
+	if ok {
+		t.Logf("Scheme: %v", scheme.Value)
 	}
 }

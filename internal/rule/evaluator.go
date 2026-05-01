@@ -23,6 +23,22 @@ type Result struct {
 	Message   string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
+// normalizeOperands converts Operands (any type) to []any for operator evaluation.
+// Handles: []any (direct use), map[string]any (wrap as single element), nil (empty).
+func normalizeOperands(operands any) []any {
+	if operands == nil {
+		return nil
+	}
+	switch v := operands.(type) {
+	case []any:
+		return v
+	case map[string]any:
+		return []any{v}
+	default:
+		return []any{v}
+	}
+}
+
 func Evaluate(
 	root *node.Node,
 	r Rule,
@@ -73,19 +89,9 @@ func Evaluate(
 	n, found := root.Resolve(r.Target)
 
 	// For presence/absence/null operators, continue evaluation even if target not found
-	// present: returns false when target not found (expected behavior)
-	// absent: returns true when target not found (expected behavior)
-	// isNull: returns false when target not found (absent is not NULL)
-	// For eq/neq operators on keyUsage boolean fields, treat missing as implicit false
-	// For other operators, skip when target not found (e.g., certificate rules when processing CRLs)
 	if !found && r.Operator != "present" && r.Operator != "absent" && r.Operator != "isNull" {
 		// Special handling for eq/neq on keyUsage boolean fields
 		if (r.Operator == "eq" || r.Operator == "neq") && isKeyUsageBooleanField(r.Target) {
-			// Missing keyUsage bit = implicit false
-			// For eq true: false != true → FAIL
-			// For eq false: false == false → PASS
-			// For neq true: false != true → PASS
-			// For neq false: false == false → FAIL
 			var targetNode *node.Node
 			op, err := reg.Get(r.Operator)
 			if err != nil {
@@ -97,7 +103,7 @@ func Evaluate(
 					Severity:  r.Severity,
 				}
 			}
-			ok, err := op.Evaluate(targetNode, ctx, r.Operands)
+			ok, err := op.Evaluate(targetNode, ctx, normalizeOperands(r.Operands))
 			if err != nil {
 				return Result{
 					RuleID:    r.ID,
@@ -144,7 +150,7 @@ func Evaluate(
 		}
 	}
 
-	ok, err := op.Evaluate(targetNode, ctx, r.Operands)
+	ok, err := op.Evaluate(targetNode, ctx, normalizeOperands(r.Operands))
 	if err != nil {
 		return Result{
 			RuleID:    r.ID,
@@ -181,7 +187,7 @@ func evaluateCondition(
 		return false, fmt.Errorf("operator not found: %s", cond.Operator)
 	}
 
-	return op.Evaluate(n, ctx, cond.Operands)
+	return op.Evaluate(n, ctx, normalizeOperands(cond.Operands))
 }
 
 func appliesTo(r Rule, ctx *operator.EvaluationContext) bool {
