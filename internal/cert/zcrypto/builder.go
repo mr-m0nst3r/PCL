@@ -114,9 +114,19 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 		root.Children["subjectAltName"] = buildSubjectAltName(cert)
 	}
 
+	// Add Issuer Alt Name (IAN)
+	if hasIAN(cert) {
+		root.Children["issuerAltName"] = buildIssuerAltName(cert)
+	}
+
 	// Add Name Constraints (for CA certificates)
 	if hasNameConstraints(cert) {
 		root.Children["nameConstraints"] = buildNameConstraints(cert)
+	}
+
+	// Add CABF Organization Identifier (for EV certificates)
+	if cert.CABFOrganizationIdentifier != nil {
+		root.Children["cabfOrganizationIdentifier"] = buildCABFOrganizationID(cert)
 	}
 
 	if len(cert.Signature) > 0 {
@@ -434,6 +444,51 @@ func buildSubjectAltName(cert *x509.Certificate) *node.Node {
 	return n
 }
 
+func hasIAN(cert *x509.Certificate) bool {
+	return len(cert.IANDNSNames) > 0 ||
+		len(cert.IANEmailAddresses) > 0 ||
+		len(cert.IANIPAddresses) > 0 ||
+		len(cert.IANURIs) > 0
+}
+
+func buildIssuerAltName(cert *x509.Certificate) *node.Node {
+	n := node.New("issuerAltName", nil)
+
+	if len(cert.IANDNSNames) > 0 {
+		dnsNode := node.New("dNSName", nil)
+		for i, dns := range cert.IANDNSNames {
+			dnsNode.Children[string(rune('0'+i))] = node.New(string(rune('0'+i)), dns)
+		}
+		n.Children["dNSName"] = dnsNode
+	}
+
+	if len(cert.IANEmailAddresses) > 0 {
+		emailNode := node.New("rfc822Name", nil)
+		for i, email := range cert.IANEmailAddresses {
+			emailNode.Children[string(rune('0'+i))] = node.New(string(rune('0'+i)), email)
+		}
+		n.Children["rfc822Name"] = emailNode
+	}
+
+	if len(cert.IANIPAddresses) > 0 {
+		ipNode := node.New("iPAddress", nil)
+		for i, ip := range cert.IANIPAddresses {
+			ipNode.Children[string(rune('0'+i))] = node.New(string(rune('0'+i)), ip.String())
+		}
+		n.Children["iPAddress"] = ipNode
+	}
+
+	if len(cert.IANURIs) > 0 {
+		uriNode := node.New("uniformResourceIdentifier", nil)
+		for i, uri := range cert.IANURIs {
+			uriNode.Children[string(rune('0'+i))] = node.New(string(rune('0'+i)), uri)
+		}
+		n.Children["uniformResourceIdentifier"] = uriNode
+	}
+
+	return n
+}
+
 func buildRSAKey(key *rsa.PublicKey) *node.Node {
 	n := node.New("publicKey", nil)
 	n.Children["keySize"] = node.New("keySize", key.N.BitLen())
@@ -613,4 +668,28 @@ func buildGeneralSubtreeNames(parent *node.Node, name string, subtrees []x509.Ge
 		subtreeNode.Children[fmt.Sprintf("%d", i)] = child
 	}
 	parent.Children[name] = subtreeNode
+}
+
+func buildCABFOrganizationID(cert *x509.Certificate) *node.Node {
+	n := node.New("cabfOrganizationIdentifier", nil)
+
+	orgID := cert.CABFOrganizationIdentifier
+	if orgID == nil {
+		return n
+	}
+
+	if orgID.Scheme != "" {
+		n.Children["scheme"] = node.New("scheme", orgID.Scheme)
+	}
+	if orgID.Country != "" {
+		n.Children["country"] = node.New("country", orgID.Country)
+	}
+	if orgID.State != "" {
+		n.Children["state"] = node.New("state", orgID.State)
+	}
+	if orgID.Reference != "" {
+		n.Children["reference"] = node.New("reference", orgID.Reference)
+	}
+
+	return n
 }
