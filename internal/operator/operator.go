@@ -67,6 +67,20 @@ var All = []Operator{
 	ComponentMinLength{},
 	ComponentRegex{},
 	ComponentNotRegex{},
+	AnyComponentMatches{},
+	NoComponentMatches{},
+	// CIDR range validation operators (for IP address checking)
+	ComponentInCIDR{},
+	ComponentNotInCIDR{},
+	// PSL/TLD validation operators (for domain name checking)
+	TLDRegistered{},
+	TLDNotRegistered{},
+	IsPublicSuffix{},
+	IsNotPublicSuffix{},
+	ComponentTLDRegistered{},
+	ComponentTLDNotRegistered{},
+	ComponentIsPublicSuffix{},
+	ComponentNotPublicSuffix{},
 	// UTF-8 validation operators
 	UTF8NoBOM{},
 	ContainsBOM{},

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -262,4 +263,234 @@ func validateComponentNotRegex(str string, re *regexp.Regexp, delimiter string) 
 		}
 	}
 	return true
+}
+
+// ComponentInCIDR checks if any component (IP address) is within any of the specified CIDR ranges.
+// Useful for checking if IP addresses fall within reserved ranges.
+//
+// Handles:
+// - Parent node with children (like iPAddress with indexed children)
+// - Single IP address string value
+//
+// Operands: list of CIDR strings (e.g., ["10.0.0.0/8", "192.168.0.0/16"])
+// Returns true if at least one IP is within any CIDR range.
+type ComponentInCIDR struct{}
+
+func (ComponentInCIDR) Name() string { return "componentInCIDR" }
+
+func (ComponentInCIDR) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bool, error) {
+	if n == nil || len(operands) < 1 {
+		return false, nil
+	}
+
+	// Parse CIDR ranges from operands
+	cidrs := parseCIDROperands(operands)
+	if len(cidrs) == 0 {
+		return false, fmt.Errorf("componentInCIDR requires valid CIDR operands")
+	}
+
+	// Handle parent node with children (iPAddress array)
+	if n.Value == nil && len(n.Children) > 0 {
+		for _, child := range n.Children {
+			str, ok := child.Value.(string)
+			if !ok {
+				continue
+			}
+			if ipInCIDRs(str, cidrs) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// Handle single IP address string value
+	str, ok := n.Value.(string)
+	if !ok {
+		return false, nil
+	}
+
+	return ipInCIDRs(str, cidrs), nil
+}
+
+// ComponentNotInCIDR checks if all components (IP addresses) are NOT within any of the specified CIDR ranges.
+// Useful for validating that IP addresses are not reserved/private.
+//
+// Handles:
+// - Parent node with children (like iPAddress with indexed children)
+// - Single IP address string value
+//
+// Operands: list of CIDR strings (e.g., ["10.0.0.0/8", "192.168.0.0/16"])
+// Returns true if ALL IPs are outside ALL CIDR ranges.
+type ComponentNotInCIDR struct{}
+
+func (ComponentNotInCIDR) Name() string { return "componentNotInCIDR" }
+
+func (ComponentNotInCIDR) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bool, error) {
+	if n == nil || len(operands) < 1 {
+		return false, nil
+	}
+
+	// Parse CIDR ranges from operands
+	cidrs := parseCIDROperands(operands)
+	if len(cidrs) == 0 {
+		return false, fmt.Errorf("componentNotInCIDR requires valid CIDR operands")
+	}
+
+	// Handle parent node with children (iPAddress array)
+	if n.Value == nil && len(n.Children) > 0 {
+		for _, child := range n.Children {
+			str, ok := child.Value.(string)
+			if !ok {
+				continue
+			}
+			if ipInCIDRs(str, cidrs) {
+				// Found an IP in a reserved range - validation fails
+				return false, nil
+			}
+		}
+		// All IPs are outside reserved ranges - validation passes
+		return true, nil
+	}
+
+	// Handle single IP address string value
+	str, ok := n.Value.(string)
+	if !ok {
+		return false, nil
+	}
+
+	return !ipInCIDRs(str, cidrs), nil
+}
+
+// parseCIDROperands converts operand list to CIDR network slices
+func parseCIDROperands(operands []any) []*net.IPNet {
+	var cidrs []*net.IPNet
+	for _, op := range operands {
+		cidrStr, ok := op.(string)
+		if !ok {
+			continue
+		}
+		_, ipNet, err := net.ParseCIDR(cidrStr)
+		if err != nil {
+			continue // Skip invalid CIDR
+		}
+		cidrs = append(cidrs, ipNet)
+	}
+	return cidrs
+}
+
+// ipInCIDRs checks if an IP address string is within any of the CIDR ranges
+func ipInCIDRs(ipStr string, cidrs []*net.IPNet) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false // Invalid IP address
+	}
+
+	for _, cidr := range cidrs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// AnyComponentMatches checks if ANY component (child value) matches the regex pattern.
+// Unlike componentRegex which splits by delimiter, this checks the entire value.
+// Useful for detecting wildcard domains (pattern "^\\*.") in SAN arrays.
+//
+// Handles:
+// - Parent node with children: returns true if ANY child matches
+// - Single string value: matches against the entire string
+//
+// Operands: [pattern]
+// Returns true if at least one component matches.
+type AnyComponentMatches struct{}
+
+func (AnyComponentMatches) Name() string { return "anyComponentMatches" }
+
+func (AnyComponentMatches) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bool, error) {
+	if n == nil || len(operands) < 1 {
+		return false, nil
+	}
+
+	pattern, ok := operands[0].(string)
+	if !ok {
+		return false, fmt.Errorf("anyComponentMatches requires string pattern operand")
+	}
+
+	re, err := getCompiledRegex(pattern)
+	if err != nil {
+		return false, err
+	}
+
+	// Handle parent node with children
+	if n.Value == nil && len(n.Children) > 0 {
+		for _, child := range n.Children {
+			str, ok := child.Value.(string)
+			if !ok {
+				continue
+			}
+			if re.MatchString(str) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// Handle single string value
+	str, ok := n.Value.(string)
+	if !ok {
+		return false, nil
+	}
+
+	return re.MatchString(str), nil
+}
+
+// NoComponentMatches checks if NO component (child value) matches the regex pattern.
+// Opposite of anyComponentMatches.
+//
+// Handles:
+// - Parent node with children: returns true if NONE of the children match
+// - Single string value: returns true if the string doesn't match
+//
+// Operands: [pattern]
+type NoComponentMatches struct{}
+
+func (NoComponentMatches) Name() string { return "noComponentMatches" }
+
+func (NoComponentMatches) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bool, error) {
+	if n == nil || len(operands) < 1 {
+		return false, nil
+	}
+
+	pattern, ok := operands[0].(string)
+	if !ok {
+		return false, fmt.Errorf("noComponentMatches requires string pattern operand")
+	}
+
+	re, err := getCompiledRegex(pattern)
+	if err != nil {
+		return false, err
+	}
+
+	// Handle parent node with children
+	if n.Value == nil && len(n.Children) > 0 {
+		for _, child := range n.Children {
+			str, ok := child.Value.(string)
+			if !ok {
+				continue
+			}
+			if re.MatchString(str) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+
+	// Handle single string value
+	str, ok := n.Value.(string)
+	if !ok {
+		return false, nil
+	}
+
+	return !re.MatchString(str), nil
 }

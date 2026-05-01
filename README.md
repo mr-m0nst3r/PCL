@@ -52,6 +52,27 @@ pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-hash sha1   # RFC 501
 pcl --policy <path> --cert leaf.pem --auto-validate --ocsp-hash sha256 # Modern (default)
 ```
 
+### Public Suffix List (PSL) Options
+
+PCL uses the Public Suffix List to validate TLDs and domain names (BR 4.2.2, 3.2.2.6):
+
+```bash
+# Use default PSL location (./data/public_suffix_list.dat or ~/.pcl/data/)
+pcl --policy <path> --cert cert.pem
+
+# Specify custom PSL file
+pcl --policy <path> --cert cert.pem --psl-file /path/to/public_suffix_list.dat
+
+# Disable PSL loading (use regex fallback)
+pcl --policy <path> --cert cert.pem --use-psl=false
+
+# Update/download PSL to default location
+pcl update-data
+
+# Update PSL to custom directory
+pcl update-data --data-dir /custom/data/path
+```
+
 ### Debug OCSP Requests
 
 Use `-vv` to see detailed OCSP request/response information:
@@ -244,6 +265,8 @@ rules:
 | `regex`, `notRegex` | Regular expression pattern matching |
 | `componentMaxLength`, `componentMinLength` | Per-component length validation (DNS labels, path segments) |
 | `componentRegex`, `componentNotRegex` | Per-component regex validation |
+| `anyComponentMatches`, `noComponentMatches` | ANY/NO component matches regex (for wildcard detection) |
+| `componentInCIDR`, `componentNotInCIDR` | Per-component CIDR range validation (for IP address checking) |
 | `utf8NoBom`, `containsBom` | UTF-8 BOM detection |
 
 ### Date Operators
@@ -330,6 +353,23 @@ rules:
 | `generalizedTimeNoFraction` | GeneralizedTime has no fractional seconds (recommended) |
 | `isUTCTime` | Time encoding is UTCTime (tag 23) |
 | `isGeneralizedTime` | Time encoding is GeneralizedTime (tag 24) |
+
+### Public Suffix List (PSL) / TLD Operators
+
+| Operator | Description |
+|----------|-------------|
+| `tldRegistered` | TLD is registered in IANA Root Zone Database (via PSL ICANN section) |
+| `tldNotRegistered` | TLD is NOT registered in IANA Root Zone Database |
+| `isPublicSuffix` | Domain is a public suffix (ICANN or private) |
+| `isNotPublicSuffix` | Domain is NOT a public suffix |
+| `componentTLDRegistered` | All domain components have registered TLDs (for SAN arrays) |
+| `componentTLDNotRegistered` | No domain component has an unregistered TLD |
+| `componentIsPublicSuffix` | FQDN portion of wildcard is a public suffix (BR 3.2.2.6) |
+| `componentNotPublicSuffix` | FQDN portion of wildcard is NOT a public suffix |
+
+These operators use the Public Suffix List (PSL) from [publicsuffix.org](https://publicsuffix.org). The PSL ICANN section contains all IANA-registered TLDs, enabling validation of:
+- **BR 4.2.2**: Internal Names - certificates must not contain domains with unregistered TLDs
+- **BR 3.2.2.6**: Wildcard certificates - FQDN portion must not be a public suffix
 
 ### ASN.1 Encoding Operators
 
