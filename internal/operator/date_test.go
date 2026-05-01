@@ -251,6 +251,132 @@ func TestDateDiff(t *testing.T) {
 			want:     true,
 			wantErr:  false,
 		},
+		{
+			name: "minHours within limit",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(12*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": 8}},
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name: "minHours below limit",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(4*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": 8}},
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name: "maxHours within limit",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(6*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "maxHours": 8}},
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name: "maxHours exceeds limit",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(12*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "maxHours": 8}},
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name: "OCSP validity interval 8 hours to 10 days - valid",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(5*24*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": 8, "maxDays": 10}},
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name: "OCSP validity interval 8 hours to 10 days - too short",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(4*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": 8, "maxDays": 10}},
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name: "OCSP validity interval 8 hours to 10 days - too long",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(12*24*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": 8, "maxDays": 10}},
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name: "int64 for minHours",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(12*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "minHours": int64(8)}},
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name: "float64 for maxHours",
+			node: func() *node.Node {
+				n := node.New("test", nil)
+				thisUpdate := node.New("thisUpdate", now)
+				nextUpdate := node.New("nextUpdate", now.Add(6*time.Hour))
+				n.Children["thisUpdate"] = thisUpdate
+				n.Children["nextUpdate"] = nextUpdate
+				return n
+			}(),
+			operands: []any{map[string]any{"start": "thisUpdate", "end": "nextUpdate", "maxHours": float64(8)}},
+			want:     true,
+			wantErr:  false,
+		},
 	}
 
 	for _, tt := range tests {

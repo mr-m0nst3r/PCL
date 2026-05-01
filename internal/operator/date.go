@@ -102,6 +102,8 @@ func toTime(v any) (time.Time, error) {
 //   - maxDays: maximum allowed days (optional)
 //   - maxMonths: maximum allowed months (optional)
 //   - minDays: minimum allowed days (optional)
+//   - minHours: minimum allowed hours (optional, for OCSP validity interval)
+//   - maxHours: maximum allowed hours (optional)
 //
 // Example YAML usage:
 //   target: crl
@@ -111,9 +113,14 @@ func toTime(v any) (time.Time, error) {
 //     end: nextUpdate
 //     maxDays: 10
 //
-// For BR CRL validation:
-//   - Subscriber CRL: maxDays: 10
-//   - CA CRL: maxMonths: 12
+// For BR OCSP validity interval (8 hours to 10 days):
+//   target: ocsp
+//   operator: dateDiff
+//   operands:
+//     start: thisUpdate
+//     end: nextUpdate
+//     minHours: 8
+//     maxDays: 10
 type DateDiff struct{}
 
 func (DateDiff) Name() string { return "dateDiff" }
@@ -129,6 +136,8 @@ func (DateDiff) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bo
 	var maxDays int
 	var maxMonths int
 	var minDays int
+	var minHours int
+	var maxHours int
 
 	if len(operands) == 0 {
 		return false, nil
@@ -165,6 +174,25 @@ func (DateDiff) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bo
 		}
 		if d, ok := m["minDays"].(int); ok {
 			minDays = d
+		}
+		// Parse hours parameters
+		if h, ok := m["minHours"].(int); ok {
+			minHours = h
+		}
+		if h64, ok := m["minHours"].(int64); ok {
+			minHours = int(h64)
+		}
+		if hf64, ok := m["minHours"].(float64); ok {
+			minHours = int(hf64)
+		}
+		if h, ok := m["maxHours"].(int); ok {
+			maxHours = h
+		}
+		if h64, ok := m["maxHours"].(int64); ok {
+			maxHours = int(h64)
+		}
+		if hf64, ok := m["maxHours"].(float64); ok {
+			maxHours = int(hf64)
 		}
 	}
 
@@ -216,6 +244,14 @@ func (DateDiff) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bo
 		}
 	}
 
+	// Check maximum hours
+	if maxHours > 0 {
+		maxDuration := time.Duration(maxHours) * time.Hour
+		if diff > maxDuration {
+			return false, nil
+		}
+	}
+
 	// Check maximum months (using AddDate for accurate month calculation)
 	if maxMonths > 0 {
 		maxDate := startDate.AddDate(0, maxMonths, 0)
@@ -227,6 +263,14 @@ func (DateDiff) Evaluate(n *node.Node, _ *EvaluationContext, operands []any) (bo
 	// Check minimum days
 	if minDays > 0 {
 		minDuration := time.Duration(minDays) * 24 * time.Hour
+		if diff < minDuration {
+			return false, nil
+		}
+	}
+
+	// Check minimum hours
+	if minHours > 0 {
+		minDuration := time.Duration(minHours) * time.Hour
 		if diff < minDuration {
 			return false, nil
 		}

@@ -9,6 +9,26 @@ import (
 	"github.com/cavoq/PCL/internal/node"
 )
 
+// Extension OID to friendly name mapping
+var extensionNames = map[string]string{
+	"2.5.29.14":          "subjectKeyIdentifier",
+	"2.5.29.15":          "keyUsage",
+	"2.5.29.17":          "subjectAltName",
+	"2.5.29.18":          "issuerAltName",
+	"2.5.29.19":          "basicConstraints",
+	"2.5.29.31":          "cRLDistributionPoints",
+	"2.5.29.32":          "certificatePolicies",
+	"2.5.29.35":          "authorityKeyIdentifier",
+	"2.5.29.37":          "extKeyUsage",
+	"1.3.6.1.5.5.7.1.1":  "authorityInfoAccess",
+	"1.3.6.1.5.5.7.1.11": "subjectInfoAccess",
+	"2.5.29.21":          "cRLReason",
+	"2.5.29.29":          "cRLNumber",
+	"2.5.29.20":          "cRLDistributionPoints", // Note: this is actually issuingDistributionPoint
+	"1.3.6.1.5.5.7.48.1": "id-ad-ocsp",
+	"1.3.6.1.5.5.7.48.2": "id-ad-caIssuers",
+}
+
 func ToStdCert(cert *zx509.Certificate) (*stdx509.Certificate, error) {
 	if cert == nil {
 		return nil, nil
@@ -88,11 +108,21 @@ func BuildExtensions(extensions []pkix.Extension) *node.Node {
 	n := node.New("extensions", nil)
 
 	for _, ext := range extensions {
-		extNode := node.New(ext.Id.String(), nil)
-		extNode.Children["oid"] = node.New("oid", ext.Id.String())
+		oidStr := ext.Id.String()
+		extNode := node.New(oidStr, nil)
+		extNode.Children["oid"] = node.New("oid", oidStr)
 		extNode.Children["critical"] = node.New("critical", ext.Critical)
 		extNode.Children["value"] = node.New("value", ext.Value)
-		n.Children[ext.Id.String()] = extNode
+
+		// Add friendly name if available
+		if name, ok := extensionNames[oidStr]; ok {
+			extNode.Children["name"] = node.New("name", name)
+			// Also add the extension under its friendly name for easier access
+			n.Children[name] = extNode
+		}
+
+		// Always add under OID
+		n.Children[oidStr] = extNode
 	}
 
 	return n

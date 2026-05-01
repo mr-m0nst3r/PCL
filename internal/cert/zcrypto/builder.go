@@ -58,6 +58,29 @@ func buildCertificate(cert *x509.Certificate) *node.Node {
 
 	if len(cert.Extensions) > 0 {
 		root.Children["extensions"] = zcrypto.BuildExtensions(cert.Extensions)
+
+		// Parse AIA extension with full ASN.1 structure
+		for _, ext := range cert.Extensions {
+			oidStr := ext.Id.String()
+			if oidStr == "1.3.6.1.5.5.7.1.1" {
+				aiaNode := ParseAIA(ext.Value)
+				if extNode, ok := root.Children["extensions"].Children["authorityInfoAccess"]; ok {
+					// Merge parsed AIA into extension node
+					for k, v := range aiaNode.Children {
+						extNode.Children[k] = v
+					}
+				}
+			}
+			if oidStr == "2.5.29.31" {
+				crlDPNode := ParseCRLDP(ext.Value)
+				if extNode, ok := root.Children["extensions"].Children["cRLDistributionPoints"]; ok {
+					// Merge parsed CRL DP into extension node
+					for k, v := range crlDPNode.Children {
+						extNode.Children[k] = v
+					}
+				}
+			}
+		}
 	}
 
 	root.Children["keyUsage"] = buildKeyUsage(cert.KeyUsage)
