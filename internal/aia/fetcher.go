@@ -57,7 +57,7 @@ func FetchCAIssuer(url string, timeout time.Duration) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch CA Issuers from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("CA Issuers server returned status %d", resp.StatusCode)
@@ -110,7 +110,7 @@ func FetchCAIssuerPKCS7(url string, timeout time.Duration) (*PKCS7Result, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch CA Issuers from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("CA Issuers server returned status %d", resp.StatusCode)

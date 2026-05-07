@@ -158,7 +158,7 @@ func Run(cfg Config, w io.Writer) error {
 				miniChain := []*cert.Info{c, chain[i+1]}
 				autoOCSPs, err := fetchAutoOCSP(miniChain, cfg.OCSPTimeout, nonceOpts)
 				if err != nil {
-					fmt.Fprintf(w, "Warning: auto OCSP fetch failed for cert %d: %v\n", i, err)
+					_, _ = fmt.Fprintf(w, "Warning: auto OCSP fetch failed for cert %d: %v\n", i, err)
 					continue
 				}
 				// Debug: print OCSP response details when verbosity >= 2
@@ -617,7 +617,7 @@ func climbChain(chain []*cert.Info, timeout time.Duration, maxDepth int, w io.Wr
 		url := top.Cert.IssuingCertificateURL[0]
 		pkcs7Result, err := aia.FetchCAIssuerPKCS7(url, timeout)
 		if err != nil {
-			fmt.Fprintf(w, "Warning: failed to climb chain from %s: %v\n", url, err)
+			_, _ = fmt.Fprintf(w, "Warning: failed to climb chain from %s: %v\n", url, err)
 			break
 		}
 
@@ -649,7 +649,7 @@ func climbChain(chain []*cert.Info, timeout time.Duration, maxDepth int, w io.Wr
 			} else {
 				// Multiple certs with no match - use first as best guess
 				issuerCert = pkcs7Result.Certs[0]
-				fmt.Fprintf(w, "Warning: PKCS#7 bundle contains %d certs, no exact issuer match found, using first cert\n", len(pkcs7Result.Certs))
+				_, _ = fmt.Fprintf(w, "Warning: PKCS#7 bundle contains %d certs, no exact issuer match found, using first cert\n", len(pkcs7Result.Certs))
 			}
 		}
 
@@ -657,7 +657,7 @@ func climbChain(chain []*cert.Info, timeout time.Duration, maxDepth int, w io.Wr
 		if issuerCert.SerialNumber != nil {
 			serial := issuerCert.SerialNumber.String()
 			if seen[serial] {
-				fmt.Fprintf(w, "Warning: circular certificate detected at %s\n", url)
+				_, _ = fmt.Fprintf(w, "Warning: circular certificate detected at %s\n", url)
 				break
 			}
 			seen[serial] = true
@@ -672,7 +672,7 @@ func climbChain(chain []*cert.Info, timeout time.Duration, maxDepth int, w io.Wr
 			source = "downloaded"
 		case aia.FormatPEM:
 			source = "downloaded PEM"
-			fmt.Fprintf(w, "Warning: CA Issuers URL %s returned PEM format (RFC 5280 requires DER/BER)\n", url)
+			_, _ = fmt.Fprintf(w, "Warning: CA Issuers URL %s returned PEM format (RFC 5280 requires DER/BER)\n", url)
 		default:
 			source = "downloaded"
 		}
@@ -711,7 +711,7 @@ func fetchAutoCRL(chain []*cert.Info, timeout time.Duration, w io.Writer) []*crl
 		for _, url := range c.Cert.CRLDistributionPoints {
 			fetchResult, err := crl.FetchCRL(url, timeout)
 			if err != nil {
-				fmt.Fprintf(w, "Warning: failed to fetch CRL from %s: %v\n", url, err)
+				_, _ = fmt.Fprintf(w, "Warning: failed to fetch CRL from %s: %v\n", url, err)
 				continue
 			}
 
@@ -762,32 +762,32 @@ func printOCSPResponseDebug(w io.Writer, ocspInfo *ocsp.Info, nonceOpts *ocsp.No
 	}
 	resp := ocspInfo.Response
 
-	fmt.Fprintf(w, "\n[OCSP Debug]\n")
-	fmt.Fprintf(w, "  URL: %s\n", ocspInfo.FilePath)
+	_, _ = fmt.Fprintf(w, "\n[OCSP Debug]\n")
+	_, _ = fmt.Fprintf(w, "  URL: %s\n", ocspInfo.FilePath)
 
 	// Print request info
-	fmt.Fprintf(w, "  Request:\n")
+	_, _ = fmt.Fprintf(w, "  Request:\n")
 	if ocspInfo.RequestRawLen > 0 {
-		fmt.Fprintf(w, "    Length: %d bytes\n", ocspInfo.RequestRawLen)
+		_, _ = fmt.Fprintf(w, "    Length: %d bytes\n", ocspInfo.RequestRawLen)
 	} else {
-		fmt.Fprintf(w, "    Length: (unknown)\n")
+		_, _ = fmt.Fprintf(w, "    Length: (unknown)\n")
 	}
 
 	// Print hash algorithm used for CertID
 	if ocspInfo.RequestHashAlgorithm != "" {
-		fmt.Fprintf(w, "    CertID Hash Algorithm: %s\n", ocspInfo.RequestHashAlgorithm)
+		_, _ = fmt.Fprintf(w, "    CertID Hash Algorithm: %s\n", ocspInfo.RequestHashAlgorithm)
 	} else {
-		fmt.Fprintf(w, "    CertID Hash Algorithm: SHA256 (default)\n")
+		_, _ = fmt.Fprintf(w, "    CertID Hash Algorithm: SHA256 (default)\n")
 	}
 
 	// Print nonce request info
 	if ocspInfo.RequestNonceLen > 0 {
-		fmt.Fprintf(w, "    Nonce Length: %d bytes\n", ocspInfo.RequestNonceLen)
-		fmt.Fprintf(w, "    Nonce (hex): %s\n", ocspInfo.RequestNonceHex)
+		_, _ = fmt.Fprintf(w, "    Nonce Length: %d bytes\n", ocspInfo.RequestNonceLen)
+		_, _ = fmt.Fprintf(w, "    Nonce (hex): %s\n", ocspInfo.RequestNonceHex)
 	} else if nonceOpts != nil && nonceOpts.Disabled {
-		fmt.Fprintf(w, "    Nonce: disabled\n")
+		_, _ = fmt.Fprintf(w, "    Nonce: disabled\n")
 	} else {
-		fmt.Fprintf(w, "    Nonce: (not requested)\n")
+		_, _ = fmt.Fprintf(w, "    Nonce: (not requested)\n")
 	}
 
 	// Print response info
@@ -802,41 +802,41 @@ func printOCSPResponseDebug(w io.Writer, ocspInfo *ocsp.Info, nonceOpts *ocsp.No
 	default:
 		statusStr = fmt.Sprintf("Unknown(%d)", resp.Status)
 	}
-	fmt.Fprintf(w, "  Response:\n")
-	fmt.Fprintf(w, "    Status: %s\n", statusStr)
-	fmt.Fprintf(w, "    ProducedAt: %s\n", resp.ProducedAt.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(w, "    ThisUpdate: %s\n", resp.ThisUpdate.Format("2006-01-02 15:04:05"))
+	_, _ = fmt.Fprintf(w, "  Response:\n")
+	_, _ = fmt.Fprintf(w, "    Status: %s\n", statusStr)
+	_, _ = fmt.Fprintf(w, "    ProducedAt: %s\n", resp.ProducedAt.Format("2006-01-02 15:04:05"))
+	_, _ = fmt.Fprintf(w, "    ThisUpdate: %s\n", resp.ThisUpdate.Format("2006-01-02 15:04:05"))
 	if !resp.NextUpdate.IsZero() {
-		fmt.Fprintf(w, "    NextUpdate: %s\n", resp.NextUpdate.Format("2006-01-02 15:04:05"))
+		_, _ = fmt.Fprintf(w, "    NextUpdate: %s\n", resp.NextUpdate.Format("2006-01-02 15:04:05"))
 	} else {
-		fmt.Fprintf(w, "    NextUpdate: (not set)\n")
+		_, _ = fmt.Fprintf(w, "    NextUpdate: (not set)\n")
 	}
 	if !resp.RevokedAt.IsZero() {
-		fmt.Fprintf(w, "    RevokedAt: %s\n", resp.RevokedAt.Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(w, "    RevocationReason: %d\n", resp.RevocationReason)
+		_, _ = fmt.Fprintf(w, "    RevokedAt: %s\n", resp.RevokedAt.Format("2006-01-02 15:04:05"))
+		_, _ = fmt.Fprintf(w, "    RevocationReason: %d\n", resp.RevocationReason)
 	}
-	fmt.Fprintf(w, "    SerialNumber: %s\n", resp.SerialNumber.String())
-	fmt.Fprintf(w, "    SignatureAlgorithm: %s\n", resp.SignatureAlgorithm.String())
+	_, _ = fmt.Fprintf(w, "    SerialNumber: %s\n", resp.SerialNumber.String())
+	_, _ = fmt.Fprintf(w, "    SignatureAlgorithm: %s\n", resp.SignatureAlgorithm.String())
 
 	// Parse nonce from raw response
 	nonceState := ocspzcrypto.ParseNonceFromRaw(resp.Raw)
-	fmt.Fprintf(w, "    Response Nonce:\n")
+	_, _ = fmt.Fprintf(w, "    Response Nonce:\n")
 	if nonceState.Present {
-		fmt.Fprintf(w, "      Present: true\n")
-		fmt.Fprintf(w, "      Length: %d bytes\n", nonceState.Length)
-		fmt.Fprintf(w, "      Value (hex): %s\n", nonceState.HexValue)
+		_, _ = fmt.Fprintf(w, "      Present: true\n")
+		_, _ = fmt.Fprintf(w, "      Length: %d bytes\n", nonceState.Length)
+		_, _ = fmt.Fprintf(w, "      Value (hex): %s\n", nonceState.HexValue)
 		// Check if nonce matches request
 		if ocspInfo.RequestNonceLen > 0 && nonceState.Length == ocspInfo.RequestNonceLen {
 			if nonceState.HexValue == ocspInfo.RequestNonceHex {
-				fmt.Fprintf(w, "      Match: YES (echoed correctly)\n")
+				_, _ = fmt.Fprintf(w, "      Match: YES (echoed correctly)\n")
 			} else {
-				fmt.Fprintf(w, "      Match: NO (different value)\n")
+				_, _ = fmt.Fprintf(w, "      Match: NO (different value)\n")
 			}
 		} else if ocspInfo.RequestNonceLen > 0 && nonceState.Length != ocspInfo.RequestNonceLen {
-			fmt.Fprintf(w, "      Match: NO (different length: requested %d, got %d)\n", ocspInfo.RequestNonceLen, nonceState.Length)
+			_, _ = fmt.Fprintf(w, "      Match: NO (different length: requested %d, got %d)\n", ocspInfo.RequestNonceLen, nonceState.Length)
 		}
 	} else {
-		fmt.Fprintf(w, "      Present: false\n")
+		_, _ = fmt.Fprintf(w, "      Present: false\n")
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 }
