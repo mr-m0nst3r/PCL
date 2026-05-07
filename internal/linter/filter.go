@@ -245,11 +245,6 @@ func policyAppliesToCRLInput(p policy.Policy) bool {
 	return false
 }
 
-// policyAppliesToOCSP checks if a policy applies to OCSP responses
-func policyAppliesToOCSP(p policy.Policy) bool {
-	return policyAppliesToInput(p, AppliesToOCSP)
-}
-
 // extKeyUsageToOID converts x509.ExtKeyUsage to OID string
 func extKeyUsageToOID(eku x509.ExtKeyUsage) string {
 	switch eku {
